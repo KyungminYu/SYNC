@@ -1,0 +1,46 @@
+{
+  "name": "sync",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": "^22.22.3 || ^24.0.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "pnpm --filter @sync/web dev",
+    "dev:agents": "pnpm --filter @sync/agent-service dev",
+    "db:start": "node scripts/db.mjs start",
+    "db:publish": "node scripts/db.mjs publish",
+    "db:generate": "node scripts/db.mjs generate",
+    "db:logs": "node scripts/db.mjs logs",
+    "build": "pnpm db:generate && pnpm typecheck:source && pnpm --filter @sync/web build",
+    "typecheck": "pnpm db:generate && pnpm typecheck:source",
+    "typecheck:source": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:integration": "tsx scripts/integration.ts",
+    "benchmark:smoke": "tsx scripts/benchmark.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@types/express": "5.0.6",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "concurrently": "10.0.6",
+    "eslint": "10.13.0",
+    "jsdom": "30.1.3",
+    "prettier": "3.9.10",
+    "spacetimedb": "2.13.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.0",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@sync/database",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@sync/core": "workspace:*",
+    "@sync/test-fixtures": "workspace:*",
+    "spacetimedb": "2.13.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,5 @@
+pnpm-lock.yaml
+packages/bindings/src
+.tools
+.local
+dist

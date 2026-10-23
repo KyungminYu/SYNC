@@ -1,0 +1,377 @@
+@import 'tailwindcss';
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #e8efe9;
+  background: #0e171b;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 1440px;
+  margin: auto;
+  padding: 0 46px;
+}
+header {
+  height: 90px;
+  border-bottom: 1px solid #2d3c40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #d8f1c8;
+  font-weight: 800;
+  font-size: 26px;
+  text-decoration: none;
+  letter-spacing: 2px;
+}
+.brand span {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 2px;
+  color: #8d9b9e;
+  margin-left: 25px;
+}
+.connection {
+  font-size: 12px;
+  color: #e4bc77;
+}
+.online {
+  color: #b8eb80;
+}
+.intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 44px 0 35px;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 2.4px;
+  color: #b8eb80;
+}
+h1 {
+  font-size: 46px;
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -1.5px;
+  margin: 15px 0;
+}
+h1 em {
+  font-style: normal;
+  color: #b8eb80;
+}
+.intro p:not(.eyebrow),
+.muted {
+  color: #91a3a7;
+  font-size: 13px;
+}
+.fixture {
+  border-left: 2px solid #b8eb80;
+  padding: 10px 24px;
+  display: grid;
+  gap: 10px;
+}
+.fixture span {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #9babaf;
+}
+.fixture strong {
+  font-size: 24px;
+  font-weight: 400;
+}
+.fixture small {
+  color: #90a2a6;
+  font-size: 11px;
+}
+.panel {
+  min-width: 0;
+  border: 1px solid #2c3d42;
+  border-radius: 9px;
+  background: #142025;
+  padding: 22px;
+}
+.controls {
+  display: flex;
+  align-items: end;
+  gap: 13px;
+  padding: 18px;
+}
+.controls label {
+  display: grid;
+  gap: 8px;
+  font-size: 10px;
+  color: #9eb0b2;
+  letter-spacing: 0.4px;
+}
+.controls input {
+  width: 80px;
+}
+input,
+select {
+  background: #0f191e;
+  border: 1px solid #3b4b50;
+  border-radius: 5px;
+  color: #dce5df;
+  padding: 10px;
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+}
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #405153;
+  background: #233237;
+  color: #e5ece4;
+  border-radius: 5px;
+  padding: 10px 13px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+button.primary {
+  background: #b8eb80;
+  color: #142314;
+  border-color: #b8eb80;
+  font-weight: 650;
+}
+.divider {
+  flex: 1;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 22px 0;
+  border: 1px solid #2c3d42;
+  border-radius: 8px;
+  padding: 20px 0;
+}
+.metric {
+  display: grid;
+  gap: 10px;
+  padding-left: 25px;
+  border-right: 1px solid #2c3d42;
+}
+.metric:last-child {
+  border: 0;
+}
+.metric span {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: #97acae;
+}
+.metric strong {
+  font-size: 30px;
+  font-weight: 450;
+}
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 22px;
+  margin-bottom: 22px;
+}
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+h2 {
+  font-size: 15px;
+  font-weight: 550;
+  margin: 0;
+}
+.section-title span {
+  font-size: 10px;
+  color: #92a7aa;
+}
+.game {
+  height: 270px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 5px;
+}
+.workers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 20px;
+}
+.workers article {
+  border-top: 1px solid #3b4b4d;
+  padding-top: 15px;
+  font-size: 12px;
+}
+.workers strong {
+  font-weight: 500;
+}
+.workers small,
+.task small,
+.decision small {
+  display: block;
+  color: #93a8aa;
+  font-size: 10px;
+  margin-top: 6px;
+}
+.workers p {
+  font-size: 10px;
+  color: #c3d8b8;
+}
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b8eb80;
+  margin-right: 6px;
+}
+.resource {
+  margin: 25px 0;
+}
+.resource > div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.resource strong {
+  font-weight: 450;
+}
+.resource span {
+  color: #a7c990;
+}
+progress {
+  width: 100%;
+  height: 7px;
+  accent-color: #b8eb80;
+}
+.task {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 0;
+  border-top: 1px solid #26383e;
+  font-size: 12px;
+}
+.task strong {
+  font-weight: 450;
+  flex: 1;
+}
+.badge {
+  font-size: 10px;
+  background: #27383e;
+  color: #b2c5c8;
+  border-radius: 4px;
+  padding: 5px 9px;
+}
+.succeeded {
+  color: #b8eb80;
+  background: #263c2b;
+}
+.running {
+  color: #80d9eb;
+  background: #203b43;
+}
+.decision {
+  display: flex;
+  gap: 15px;
+  font-size: 11px;
+  border-top: 1px solid #26383e;
+  padding: 14px 0;
+}
+.decision strong {
+  font-weight: 450;
+}
+.tick {
+  font-family: monospace;
+  color: #b8eb80;
+}
+.empty {
+  padding: 25px 0;
+  font-size: 13px;
+  color: #81969d;
+}
+.registration {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+.registration > div {
+  flex: 1;
+}
+.registration p {
+  font-size: 11px;
+  color: #93a8aa;
+}
+.registration input {
+  width: 280px;
+}
+.error {
+  padding: 15px;
+  background: #4a2927;
+  color: #ffbdb2;
+  border-radius: 6px;
+  margin-bottom: 15px;
+}
+footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 25px 0 35px;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: #81969d;
+}
+@media (max-width: 1000px) {
+  main {
+    padding: 0 20px;
+  }
+  .controls {
+    flex-wrap: wrap;
+  }
+  .columns {
+    grid-template-columns: 1fr;
+  }
+  .fixture {
+    display: none;
+  }
+  .brand span {
+    display: none;
+  }
+  .registration {
+    flex-wrap: wrap;
+  }
+  .registration input {
+    width: 100%;
+  }
+}
+@media (max-width: 550px) {
+  h1 {
+    font-size: 35px;
+  }
+  .metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  .workers {
+    grid-template-columns: 1fr 1fr;
+  }
+  footer span {
+    display: none;
+  }
+}
