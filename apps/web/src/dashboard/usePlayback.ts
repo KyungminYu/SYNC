@@ -131,7 +131,6 @@ export function usePlayback(
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
     // The loop reads everything through refs; it runs once per mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const jump = (next: number) => {

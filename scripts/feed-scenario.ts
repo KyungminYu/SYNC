@@ -31,6 +31,7 @@ import {
   applyScenario,
   scenarioById,
   SCENARIOS,
+  type ScenarioDef,
 } from '../apps/web/src/sync/scenarioCatalog';
 import { driveScenario } from './lib/driveScenario';
 
@@ -53,12 +54,14 @@ const database = flag('db', config.database);
 if (!Number.isInteger(trays) || trays < 1 || trays > 20)
   throw new Error('--trays must be 1�20');
 if (!Number.isInteger(tickMs) || tickMs < 0 || tickMs > 60000)
-  throw new Error('--ms must be 0�60000');
-const scenario = scenarioById(flag('scenario', ''));
-if (!scenario)
+  throw new Error('--ms must be 0–60000');
+const picked = scenarioById(flag('scenario', ''));
+if (!picked)
   throw new Error(
     `--scenario must be one of ${SCENARIOS.map((s) => s.id).join(', ')}`,
   );
+// Bound once checked: narrowing does not reach into the functions below.
+const scenario: ScenarioDef = picked;
 
 mkdirSync('.local', { recursive: true });
 // One scenario at a time: a new feeder ends any feeder still running (from
@@ -109,7 +112,7 @@ if (newViewer) {
 function connect() {
   return new Promise<DbConnection>((resolve, reject) => {
     const timer = setTimeout(() => {
-      connection?.disconnect();
+      connection.disconnect();
       reject(new Error('Database connection timed out'));
     }, 10000);
     const connection = DbConnection.builder()
