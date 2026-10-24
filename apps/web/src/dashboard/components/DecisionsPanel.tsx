@@ -4,7 +4,6 @@ import type {
   Decision,
   Policy,
   Resource,
-  ResourceType,
 } from '../../sync/contract';
 import {
   decisionsAt,
@@ -30,14 +29,6 @@ interface Props {
   selectedId?: string;
   onSelect(d: Decision): void;
 }
-
-/** Row titles per kind of work, as in the Figma rows ("c28 · Take order"). */
-const WORK: Record<ResourceType, string> = {
-  register: 'Take order',
-  bar: 'Make drink',
-  pickup: 'Hand to customer',
-  clean: 'Clean up',
-};
 
 /** Simulated seconds with one decimal. */
 const fmtT = (t: number) => `${t.toFixed(1)}s`;
@@ -96,7 +87,9 @@ export const DecisionsPanel = memo(function DecisionsPanel(p: Props) {
       <ol className="history">
         {list.map((d) => {
           const who = agent(d.agentId);
-          const work = WORK[resource(d.resourceId)?.type ?? 'register'];
+          // Row title names the actual step ("c28 · Payment"), so one
+          // customer's steps at the same station stay distinguishable.
+          const work = d.taskLabel;
           return (
             <li key={d.id}>
               <button
