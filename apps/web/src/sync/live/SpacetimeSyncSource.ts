@@ -31,6 +31,11 @@ const QUERIES = [
 const TOKEN_KEY = `sync-token:${env.VITE_SPACETIMEDB_URI}:${env.VITE_SPACETIMEDB_DATABASE}`;
 /** Rebuild at most this often (ms); one engine tick changes many rows. */
 const REBUILD_MS = 150;
+/**
+ * An unfinished scenario whose tick has not moved for this long (ms) has lost
+ * its driver (feeder stopped): it is shown as stopped and can be rerun.
+ */
+const STALL_MS = 5000;
 
 /** Reads a stored token; storage can be unavailable (private mode). */
 function loadToken() {
@@ -114,6 +119,12 @@ export class SpacetimeSyncSource implements SyncSource {
    * (just started or rerun) is followed in live mode.
    */
   private known?: Map<string, bigint>;
+  /** Last tick seen per scenario and when it last moved (stall detection). */
+  private progress = new Map<string, { tick: number; at: number }>();
+  /** True once the first subscribed rows were read (later scenarios are new). */
+  private loaded = false;
+  /** Live: periodic re-check so a stalled scenario turns 'stopped' without new rows. */
+  private stallTimer?: ReturnType<typeof setInterval>;
   /**
    * Every decision seen per run. `ui_decisions` keeps only the newest 200,
    * so older ones are remembered here to keep the full history on screen.
@@ -132,6 +143,8 @@ export class SpacetimeSyncSource implements SyncSource {
     const generation = this.generation;
     const current = () => this.generation === generation;
     this.set({ status: { kind: 'connecting' }, runs: {} });
+    if (this.mode === 'live')
+      this.stallTimer = setInterval(() => current() && this.schedule(), STALL_MS / 2);
     this.conn = DbConnection.builder()
       .withUri(env.VITE_SPACETIMEDB_URI)
       .withDatabaseName(env.VITE_SPACETIMEDB_DATABASE)
@@ -200,6 +213,8 @@ export class SpacetimeSyncSource implements SyncSource {
 
   disconnect() {
     this.generation++;
+    clearInterval(this.stallTimer);
+    this.stallTimer = undefined;
     clearTimeout(this.timer);
     this.timer = undefined;
     const conn = this.conn;
@@ -278,21 +293,40 @@ export class SpacetimeSyncSource implements SyncSource {
       decisions: [...(this.decisions.get(String(run.id))?.values() ?? [])],
       metrics: metrics.find((m) => m.runId === run.id),
     });
+    // Running = its tick moved within STALL_MS. Unfinished scenarios already
+    // in the database on first load count as stopped until their tick moves
+    // (an old stopped run must not look alive); one that appears later was
+    // just started, so it counts as running right away.
+    const now = Date.now();
+    const firstLoad = !this.loaded;
+    const state = (s: Scenario) => {
+      if (done(s)) return 'completed';
+      const tick = (s.runs.sync ?? s.runs.baseline)!.tick;
+      const seen = this.progress.get(s.id);
+      if (!seen) this.progress.set(s.id, { tick, at: firstLoad ? 0 : now });
+      else if (seen.tick !== tick) this.progress.set(s.id, { tick, at: now });
+      return now - this.progress.get(s.id)!.at > STALL_MS ? 'stopped' : 'running';
+    };
     const runs: SyncSnapshot['runs'] = {};
+    // A stopped scenario no longer moves: show it like a finished one
+    // (no live clock or Stop, normal replay controls).
+    const stopped = chosen && state(chosen) === 'stopped';
     for (const p of ['baseline', 'sync'] as Policy[]) {
       const run = chosen?.runs[p];
-      if (run) runs[p] = mapRun(rowsFor(run), p, undefined, chosen.id);
+      if (!run) continue;
+      const data = mapRun(rowsFor(run), p, undefined, chosen.id);
+      runs[p] = stopped ? { ...data, run: { ...data.run, status: 'finished' } } : data;
     }
-
-    // Dropdown entries: "Mid-2" with its state and tick. Runs advance while
-    // paused between feeder steps, so an unfinished pair counts as running.
+    // Dropdown entries: "Mid-2" with its state and tick. Runs sit paused
+    // between feeder steps, so an unfinished pair counts as running until its
+    // tick stops moving (then stopped, and it can be rerun).
     const options: ScenarioOption[] = scenarios.map((s) => {
       const run = (s.runs.sync ?? s.runs.baseline)!;
       return {
         id: s.id,
         label: s.id,
         group: s.load,
-        meta: `${done(s) ? 'completed' : 'running'} · tick ${run.tick}`,
+        meta: `${state(s)} · tick ${run.tick}`,
       };
     });
     const identity = conn.identity?.toHexString() ?? '';
@@ -302,6 +336,7 @@ export class SpacetimeSyncSource implements SyncSource {
           .map((r) => `${r!.name} (run ${r!.id})`)
           .join(' vs ')
       : '';
+    this.loaded = true;
     this.set({
       status: { kind: 'ready' },
       runs,

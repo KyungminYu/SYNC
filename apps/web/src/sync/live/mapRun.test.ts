@@ -113,3 +113,57 @@ describe('mapRun', () => {
     expect(peakWaiting(data)).toBe(1);
   });
 });
+
+describe('mapRun with one engine order holding several drinks', () => {
+  // c1: one order (id 21) for a latte and a black coffee.
+  const key = cartKeyFor('c1', [
+    { name: 'Latte', complexity: 'medium' },
+    { name: 'Black coffee', complexity: 'simple' },
+  ]);
+  let id = 500n;
+  const t = (kind: string, role: string, w: bigint, s: number, f: number): TaskRow => ({
+    id: id++, runId: 1n, orderId: 21n, kind, role, workerId: w,
+    startedTick: s, finishedTick: f, finishAtTick: f, durationTicks: f - s,
+  });
+  const rows2: RunRows = {
+    run: { id: 1n, name: 'Low-2 · SYNC', seed: 5, tick: 40, status: 'running' },
+    orders: [
+      { id: 21n, runId: 1n, cartKey: key, recipe: 'latte', arrivalTick: 10, deadlineTick: 98, deliveredTick: 34 },
+    ],
+    // Creation order: order tasks, then per drink coffee (+ milk) and assembly.
+    tasks: [
+      t('capture_order', 'cashier', 1n, 11, 14),
+      t('take_payment', 'cashier', 1n, 14, 16),
+      t('prepare_coffee', 'barista', 11n, 16, 21),
+      t('prepare_milk', 'barista', 12n, 16, 20),
+      t('assemble_drink', 'barista', 11n, 21, 23),
+      t('prepare_coffee', 'barista', 12n, 20, 25),
+      t('assemble_drink', 'barista', 12n, 25, 27),
+      t('pick_up_drink', 'server', 21n, 28, 29),
+      t('deliver_order', 'server', 21n, 29, 34),
+    ],
+    workers,
+    decisions: [],
+  };
+  const data = normalizeRun(mapRun(rows2, 'sync'));
+
+  it('gives every task its own id and numbers the drinks', () => {
+    const ids = data.tasks.map((x) => x.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain('c1.prepare_coffee.1');
+    expect(ids).toContain('c1.prepare_coffee.2');
+    expect(data.tasks.find((x) => x.id === 'c1.assemble_drink.2')?.label).toBe('Make drink (2/2)');
+    // One order task and one payment for the customer.
+    expect(data.tasks.filter((x) => x.type === 'register')).toHaveLength(2);
+    expect(data.tasks.find((x) => x.id === 'c1.capture_order.1')?.label).toBe('Take order');
+    expect(checkRun(data)).toEqual([]);
+  });
+
+  it('moves to waiting after paying and completes on delivery', () => {
+    const lanes = buildLanes(data.layout, 10);
+    expect(sceneAt(data, 15, lanes).customers[0].stage).toBe('ordering');
+    expect(sceneAt(data, 17, lanes).customers[0].stage).toBe('waiting');
+    expect(data.events.find((e) => e.type === 'job.completed')?.t).toBe(34);
+    expect(data.jobs[0].label).toBe('Latte + Black coffee');
+  });
+});
