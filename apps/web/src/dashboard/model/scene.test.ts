@@ -56,6 +56,22 @@ describe('sceneAt', () => {
     expect(x(done.t + 10)).toBeGreaterThanOrEqual(waitingZone.x);
   });
 
+  it('calls a customer without a waiting spot from where they stand (no jump)', () => {
+    // No free spot: customers wait at the end of the counter lane.
+    const lanes = { ...buildLanes(run.layout), waitingSpots: [] };
+    const job = run.jobs[3];
+    const called = run.events.find(
+      (e) => e.type === 'task.started' && e.taskId === `${job.id}.handoff`,
+    )!.t;
+    const at = (t: number) =>
+      sceneAt(run, t, lanes).customers.find((c) => c.id === job.id)!;
+    const before = at(called - 0.05);
+    const after = at(called + 0.05);
+    expect(before.stage).toBe('waiting');
+    expect(after.stage).toBe('ready');
+    expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeLessThan(0.2);
+  });
+
   it('shows a busy slot with progress and a working agent', () => {
     const start = run.events.find(
       (e) => e.type === 'task.started' && e.data?.duration,

@@ -503,6 +503,20 @@ export function sceneAt(
         ];
   const fromSpot = (spot: WaitingSpot, to: Point): Point[] =>
     [...toSpot(to, spot)].reverse();
+  /** Register → waiting spot, or → end of the counter lane when no spot is free. */
+  const waitingRoute = (
+    c: { register?: string },
+    spot: WaitingSpot | undefined,
+  ): Point[] => {
+    const reg = counterAt(c.register);
+    return spot
+      ? toSpot(reg, spot)
+      : [
+          reg,
+          { x: reg.x, y: lanes.counterY },
+          { x: lanes.spurX, y: lanes.counterY },
+        ];
+  };
 
   // Customers leaving a spot that shares an aisle go one at a time.
   const aisleFreeAt = new Map<number, number>();
@@ -584,20 +598,27 @@ export function sceneAt(
       // Called at once by a free register: the walk starts when they step in.
       p = walkAt(route, Math.max(c.orderStart!, c.entered!), t);
     } else if (c.stage === 'waiting') {
-      // From the register to the assigned spot, then stay there.
-      const reg = counterAt(c.register);
-      const route = spot
-        ? toSpot(reg, spot)
-        : [
-            reg,
-            { x: reg.x, y: lanes.counterY },
-            { x: lanes.spurX, y: lanes.counterY },
-          ];
-      p = walkAt(route, c.orderEnd!, t);
+      // From the register to the assigned spot (or, with every spot taken,
+      // the end of the counter lane), then stay there.
+      p = walkAt(waitingRoute(c, spot), c.orderEnd!, t);
     } else if (c.stage === 'ready') {
-      // Called: leave the spot (waiting for a busy aisle) and go to pickup.
+      // Called: go to pickup from where they stand, never from elsewhere.
       const to = counterAt(c.pickup);
-      const route = spot ? fromSpot(spot, to) : [counterAt(c.register), to];
+      const from =
+        c.orderEnd === undefined
+          ? counterAt(c.register)
+          : walkAt(waitingRoute(c, spot), c.orderEnd, c.handoffStart!);
+      const route =
+        spot && 'done' in from && from.done
+          ? // At the spot: leave it (waiting for a busy aisle).
+            fromSpot(spot, to)
+          : // Still walking there, or no spot: straight from here.
+            [
+              from,
+              { x: from.x, y: lanes.counterY },
+              { x: to.x, y: lanes.counterY },
+              to,
+            ];
       p = walkAt(route, aisleStart.get(id) ?? c.handoffStart!, t);
     } else {
       // Served: counter lane to the exit lane, then out through the door.
