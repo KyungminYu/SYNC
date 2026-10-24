@@ -70,9 +70,40 @@ describe('dev feeder process lifecycle', () => {
     ]);
     child.emit('spawn');
     expect(response.statusCode).toBe(202);
-    expect(request('POST', body).statusCode).toBe(409);
     child.emit('close', 0);
     expect(JSON.parse(request('GET').body).state).toBe('completed');
+  });
+  it('starting another scenario ends the running one', () => {
+    const { request, child } = setup();
+    request('POST', body);
+    child.emit('spawn');
+    const next = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+    });
+    mock.spawn.mockReturnValueOnce(next);
+    const second = request('POST', { ...body, scenario: 'Mid-2' });
+    expect(child.kill).toHaveBeenCalled();
+    expect(mock.spawn).toHaveBeenCalledTimes(2);
+    next.emit('spawn');
+    expect(second.statusCode).toBe(202);
+    // The old feeder closing late must not overwrite the new job's state.
+    child.emit('close', 1);
+    expect(JSON.parse(request('GET').body)).toMatchObject({
+      state: 'running',
+      scenario: 'Mid-2',
+      running: true,
+    });
+  });
+  it('stop from the dashboard ends the feeder and reports stopped', () => {
+    const { request, child } = setup();
+    request('POST', body);
+    child.emit('spawn');
+    expect(JSON.parse(request('DELETE').body).stopped).toBe(true);
+    expect(child.kill).toHaveBeenCalled();
+    child.emit('close', 1);
+    expect(JSON.parse(request('GET').body).state).toBe('stopped');
   });
   it('contains launch errors and permits retry without killing Vite', () => {
     const { request, child } = setup();

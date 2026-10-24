@@ -14,4 +14,18 @@ export interface ScenarioRunner {
    * as, so the new runs are shared with it. Resolves when execution completes; rejects on launch or execution failure.
    */
   start(id: string, viewer: string): Promise<void>;
+  /** Stops the scenario being played; its runs stay unfinished (shown as stopped). */
+  stop?(): Promise<void>;
+  /**
+   * The global clock of the scenario being played: tick n is due at
+   * startedAt + n × tickMs (epoch ms). Undefined when nothing is playing.
+   */
+  clock?(): Promise<RunnerClock | undefined>;
+}
+
+/** Global clock shared by the runner and every viewer of its scenario. */
+export interface RunnerClock {
+  scenario: string;
+  startedAt: number;
+  tickMs: number;
 }
