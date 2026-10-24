@@ -359,7 +359,8 @@ export function sceneAt(
       const slot = slotViews.find(
         (v) => v.state === 'busy' && slots.get(v.id)!.busy?.agentId === a.id,
       );
-      if (s.working && slot) {
+      // Fixed (Baseline) staff work from their own spot; the slot shows progress.
+      if (s.working && slot && !a.fixed) {
         const location = resources.get(slot.id);
         if (location)
           pos = {
@@ -384,6 +385,8 @@ export function sceneAt(
         facing: 'down' as Facing,
       };
     });
+  // One person per slot: an idle person whose slot is taken waits aside.
+  clearSlots(agentViews, layout, lanes);
 
   const jobs = new Map(data.jobs.map((j) => [j.id, j]));
   const counterAt = (id?: string): Point => ({
@@ -622,6 +625,50 @@ export function sceneAt(
     done,
     late,
   };
+}
+
+/** Gap between people waiting at the staff spot (grid units). */
+export const STAFF_SPOT_GAP = 0.75;
+
+/**
+ * One person per slot (Figma "Staff rules v2"): when people stand on the same
+ * spot (a helper working a colleague's slot), the one working keeps it and
+ * the others walk to the staff spot in the aisle — between the bar row's last
+ * slot and the first pickup — away from every slot. Fixed (Baseline) staff
+ * never move. Mutates the views in place; positions only.
+ */
+export function clearSlots(views: AgentView[], layout: Layout, lanes: Lanes) {
+  const bars = layout.resources.filter((r) => r.type === 'bar').map((r) => r.x);
+  const pickups = layout.resources
+    .filter((r) => r.type === 'pickup')
+    .map((r) => r.x);
+  const spotX =
+    bars.length && pickups.length
+      ? (Math.max(...bars) + Math.min(...pickups)) / 2
+      : (lanes.headX + lanes.exitX) / 2;
+  const fixed = new Set(layout.agents.filter((a) => a.fixed).map((a) => a.id));
+  // Same spot = same position to 1/100 of a tile (walkers mid-route never match).
+  const spots = new Map<string, AgentView[]>();
+  for (const v of views) {
+    const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+    spots.set(key, [...(spots.get(key) ?? []), v]);
+  }
+  let waiting = 0;
+  for (const group of spots.values()) {
+    if (group.length < 2) continue;
+    // Working first, then fixed staff (never move), then layout order.
+    const rank = (v: AgentView) =>
+      (v.state === 'working' ? 2 : 0) + (fixed.has(v.id) ? 1 : 0);
+    const ordered = [...group].sort((a, b) => rank(b) - rank(a));
+    for (const v of ordered.slice(1)) {
+      if (fixed.has(v.id)) continue;
+      // Side by side at the staff spot: centre, then right, left, …
+      const k = waiting++;
+      const offset = Math.ceil(k / 2) * (k % 2 ? 1 : -1) * STAFF_SPOT_GAP;
+      v.x = spotX + offset;
+      v.y = lanes.staffAisleY;
+    }
+  }
 }
 
 /**

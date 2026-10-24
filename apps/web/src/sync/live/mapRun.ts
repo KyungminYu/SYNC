@@ -24,10 +24,13 @@ import { buildLayout, ROLE_NAME, ROLE_TYPE, SCENARIO_T } from '../shopLayout';
  *   cart (cartKey "c7:latte+mocha") → Job (customer c7)
  *   order (one drink)              → Job.items entry
  *   task (capture_order, …)        → Task, type from the worker role
- *   worker ("cashier 2")           → Agent cashier2, fixed at its own slot
+ *   workers of one role            → one Agent per role ("cashier"): the
+ *   ("cashier 1", "cashier 2")       floor shows one person per role
  *   decision                       → Decision (assign; no candidates)
- * The engine has no move or lease rows; staff stay at their slot, so no
- * agent.move or lease events are produced.
+ * The engine has no move or lease rows, so no agent.move or lease events are
+ * produced. One person per slot and per role (Figma "Staff rules v2"): a task
+ * its person cannot be drawn at (already working elsewhere) shows on its slot
+ * only. Baseline staff never leave their own slot.
  */
 
 /** Subset of `ui_runs` the mapping reads. Field names match @sync/bindings. */
@@ -138,10 +141,13 @@ function orderLabel(names: string[]) {
 }
 
 /**
- * Staff from `ui_workers`: "cashier 2" becomes agent cashier2 standing at
- * the second register for the whole run (the engine does not move workers).
+ * Staff from `ui_workers`: every worker of a role ("cashier 1", "cashier 2")
+ * is the same person on the floor, agent "cashier", whose home is the role's
+ * first slot. The engine's extra workers (switched on and off with the load)
+ * never add a second person. `slotOf` keeps each worker's own slot, which
+ * is still preferred for its tasks. Baseline staff are fixed to their home.
  */
-function liveLayout(workers: WorkerRow[]) {
+function liveLayout(workers: WorkerRow[], fixed: boolean) {
   const base = buildLayout();
   const slotOf = new Map<string, { agentId: string; resourceId: string }>();
   const agents: Agent[] = [];
@@ -151,18 +157,23 @@ function liveLayout(workers: WorkerRow[]) {
     const index = Number(w.label.match(/(\d+)\s*$/)?.[1] ?? 1) - 1;
     const slots = base.resources.filter((r) => r.type === ROLE_TYPE[role]);
     const slot = slots[Math.min(index, slots.length - 1)];
-    const id = `${w.role}${index + 1}`;
-    agents.push({
-      id,
-      name: `${ROLE_NAME[role]} ${index + 1}`,
-      role: role,
-      enabled: w.enabled ?? true,
-      primaryTypes: [ROLE_TYPE[role]],
-      startX: slot.standX ?? slot.x,
-      startY: slot.standY ?? slot.y,
-    });
-    slotOf.set(String(w.id), { agentId: id, resourceId: slot.id });
+    if (!agents.some((a) => a.id === role)) {
+      const home = slots[0];
+      agents.push({
+        id: role,
+        name: ROLE_NAME[role],
+        role,
+        primaryTypes: [ROLE_TYPE[role]],
+        startX: home.standX ?? home.x,
+        startY: home.standY ?? home.y,
+        ...(fixed ? { fixed: true } : {}),
+      });
+    }
+    slotOf.set(String(w.id), { agentId: role, resourceId: slot.id });
   }
+  // Same order as the shop layout (cashier, barista, server, cleaner).
+  const order = base.agents.map((a) => a.role);
+  agents.sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
   const layout: Layout = { ...base, agents };
   return { layout, slotOf };
 }
@@ -209,7 +220,7 @@ export function mapRun(
   /** Scenario id shown as the run's scenario, e.g. "Mid-2". */
   scenario = 'Live run',
 ): RunData {
-  const { layout, slotOf } = liveLayout(rows.workers);
+  const { layout, slotOf } = liveLayout(rows.workers, policy === 'baseline');
   const resourceType = new Map(layout.resources.map((r) => [r.id, r.type]));
   const agentName = new Map(layout.agents.map((a) => [a.id, a.name]));
 
@@ -354,8 +365,17 @@ export function mapRun(
     if (successor && predecessor && !successor.deps.includes(predecessor))
       successor.deps.push(predecessor);
   }
-  const taskPlaces = new Map<string, { agentId: string; resourceId: string }>();
+  /**
+   * Where each task is shown. `onFloor` = its person is drawn doing it; false
+   * when that person is already working another task (one person per role).
+   */
+  const taskPlaces = new Map<
+    string,
+    { agentId: string; resourceId: string; onFloor: boolean }
+  >();
   const busyUntil = new Map<string, number>();
+  /** When each person is free again. */
+  const agentFreeAt = new Map<string, number>();
   for (const task of [...taskRows].sort(
     (a, b) => (a.startedTick ?? Infinity) - (b.startedTick ?? Infinity),
   )) {
@@ -372,15 +392,18 @@ export function mapRun(
           r.id === home.resourceId &&
           (busyUntil.get(r.id) ?? 0) <= task.startedTick!,
       ) ??
-      choices.find((r) => (busyUntil.get(r.id) ?? 0) <= task.startedTick!) ??
-      choices[0];
-    if (station) {
-      taskPlaces.set(String(task.id), {
-        agentId: home.agentId,
-        resourceId: station.id,
-      });
-      busyUntil.set(station.id, task.finishedTick ?? Infinity);
-    }
+      choices.find((r) => (busyUntil.get(r.id) ?? 0) <= task.startedTick!);
+    // Every slot of this type is taken: never draw a second task on one slot.
+    if (!station) continue;
+    const end = task.finishedTick ?? Infinity;
+    const onFloor = (agentFreeAt.get(home.agentId) ?? 0) <= task.startedTick;
+    if (onFloor) agentFreeAt.set(home.agentId, end);
+    taskPlaces.set(String(task.id), {
+      agentId: home.agentId,
+      resourceId: station.id,
+      onFloor,
+    });
+    busyUntil.set(station.id, end);
   }
 
   // Events from task timestamps. Same-tick order: arrivals, finishes and
@@ -403,12 +426,14 @@ export function mapRun(
     const id = taskId.get(String(r.id));
     const where = taskPlaces.get(String(r.id));
     if (!id || r.startedTick === undefined || !where) continue;
+    // Without its person on the floor the task shows on its slot only.
     const base = {
       taskId: id,
-      agentId: where.agentId,
+      ...(where.onFloor ? { agentId: where.agentId } : {}),
       resourceId: where.resourceId,
     };
-    raw.push({ t: r.startedTick, type: 'task.assigned', ...base });
+    if (where.onFloor)
+      raw.push({ t: r.startedTick, type: 'task.assigned', ...base });
     raw.push({
       t: r.startedTick,
       type: 'task.started',
