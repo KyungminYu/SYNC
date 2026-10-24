@@ -79,20 +79,32 @@ export class SampleSyncSource implements SyncSource {
     const inner = this.active.getSnapshot();
     const stored = this.stored.getSnapshot();
     const c = this.cache;
-    if (c && c.inner === inner && c.stored === stored && c.selected === this.selected)
+    if (
+      c &&
+      c.inner === inner &&
+      c.stored === stored &&
+      c.selected === this.selected
+    )
       return c.outer;
     const saved = (stored.scenarios ?? []).map((s) => ({
       ...s,
-      group: 'Saved live results',
+      group:
+        s.run?.planner === 'llm'
+          ? 'Saved live results · LLM'
+          : 'Saved live results',
     }));
     // A picked result that disappeared (database reset) falls back to the mock.
-    if (this.selected !== MOCK_SCENARIO_ID && !saved.some((s) => s.id === this.selected))
+    if (
+      this.selected !== MOCK_SCENARIO_ID &&
+      !saved.some((s) => s.id === this.selected)
+    )
       this.selected = MOCK_SCENARIO_ID;
     const shown = this.active.getSnapshot();
     const outer: SyncSnapshot = {
       ...shown,
       // Showing the mock never needs the database's empty-state hint.
-      emptyHint: this.selected === MOCK_SCENARIO_ID ? undefined : shown.emptyHint,
+      emptyHint:
+        this.selected === MOCK_SCENARIO_ID ? undefined : shown.emptyHint,
       scenarios: [MOCK_OPTION, ...saved],
       scenarioId: this.selected,
     };

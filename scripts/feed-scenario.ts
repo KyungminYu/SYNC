@@ -227,6 +227,7 @@ async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
       tickMs,
       viewers: [...viewers],
       log: console.log,
+      planner: planner === 'llm' ? 'llm' : 'algorithm',
       onRuns: reporter
         ? ({ sync }) => {
             const granted = conn.reducers.grantMember({

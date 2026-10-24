@@ -4,6 +4,7 @@ import type { Policy } from '../contract';
 import type { ScenarioOption, SyncSnapshot, SyncSource } from '../source';
 import { mapRun, type DecisionRow, type RunRow, type RunRows } from './mapRun';
 import { LOADS, parseRunName } from './scenarioNames';
+import type { Planner } from '../runner';
 
 /**
  * Read-only SpacetimeDB adapter: subscribes to the `ui_*` views and turns the
@@ -61,6 +62,8 @@ interface Scenario {
   id: string;
   load: string;
   n: number;
+  /** Fixed scenario ("Mid-2") and SYNC planner; absent for external runs. */
+  run?: { scenario: string; planner: Planner };
   runs: Partial<Record<Policy, RunRow>>;
 }
 
@@ -84,6 +87,7 @@ export function scenariosOf(runs: RunRow[], completedOnly = false): Scenario[] {
       id: p.scenario,
       load: p.load,
       n: p.n,
+      run: { scenario: `${p.load}-${p.n}`, planner: p.planner },
       runs: {},
     };
     // Keep the newest run if a name repeats.
@@ -102,8 +106,11 @@ export function scenariosOf(runs: RunRow[], completedOnly = false): Scenario[] {
     const old = latest.get(s.id);
     if (!old || newestId(s) > newestId(old)) latest.set(s.id, s);
   }
+  // Algorithm results first, then LLM ones, each Low → High.
+  const llm = (s: Scenario) => (s.run?.planner === 'llm' ? 1 : 0);
   return [...latest.values()].sort(
     (a, b) =>
+      llm(a) - llm(b) ||
       LOADS.indexOf(a.load as never) - LOADS.indexOf(b.load as never) ||
       a.n - b.n,
   );
@@ -368,8 +375,9 @@ export class SpacetimeSyncSource implements SyncSource {
       return {
         id: s.id,
         label: s.id,
-        group: s.load,
+        group: s.run?.planner === 'llm' ? `${s.load} · LLM` : s.load,
         canRun: s.load !== 'External workers',
+        run: s.run,
         meta: `${state(s)} · tick ${tickOf(s)}`,
       };
     });

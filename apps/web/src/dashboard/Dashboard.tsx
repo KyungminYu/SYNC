@@ -263,10 +263,15 @@ export function Dashboard({
                     if (!viewer)
                       throw new Error('Not connected to the database yet.');
                     // The source follows the scenario once its new runs appear.
+                    // An "· LLM" entry reruns its fixed scenario with the LLM;
+                    // other entries use the planner switch.
+                    const run = scenarios?.find((s) => s.id === id)?.run;
                     await runner.start(
-                      id,
+                      run?.scenario ?? id,
                       viewer,
-                      planner === 'llm' && llmOk ? 'llm' : 'algorithm',
+                      run?.planner === 'llm' || (planner === 'llm' && llmOk)
+                        ? 'llm'
+                        : 'algorithm',
                     );
                   })
                 }

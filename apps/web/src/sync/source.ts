@@ -34,6 +34,8 @@ export interface ScenarioOption {
   detail?: string;
   /** Listed but not viewable yet (e.g. a scenario that was never run). */
   disabled?: boolean;
+  /** What Run plays for this entry: the fixed scenario and its SYNC planner. */
+  run?: { scenario: string; planner: 'algorithm' | 'llm' };
 }
 
 /** Everything the source has delivered so far. Immutable: a new object per change. */
