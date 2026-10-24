@@ -43,6 +43,9 @@ export interface DriveOptions {
   log?(line: string): void;
 }
 
+/** Tick the first customer walks in at (a short lead-in before the rush). */
+const FIRST_ARRIVAL_TICK = 3;
+
 /** Customer deadline: 90 s after walking in (the dashboard's arrival + 90 rule). */
 const DEADLINE_FROM_DOOR = 90;
 /** Runs one identity may own (engine `create_run` limit). */
@@ -134,11 +137,11 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
 
   // A customer's orders enter the engine the moment they walk in (the
   // dashboard dates the arrival by that tick). The schedule is shifted so
-  // the first customer walks in at tick 0: the shop is busy from the start.
+  // the first customer walks in at FIRST_ARRIVAL_TICK.
   const first = Math.min(...o.customers.map((c) => c.arrival));
   const arrivals = o.customers.map((c) => ({
     ...c,
-    tick: Math.round(c.arrival - first),
+    tick: FIRST_ARRIVAL_TICK + Math.round(c.arrival - first),
   }));
   const lastArrival = Math.max(...arrivals.map((c) => c.tick));
   const status = (id: bigint) =>
