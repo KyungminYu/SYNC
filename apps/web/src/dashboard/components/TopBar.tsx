@@ -25,6 +25,7 @@ export function TopBar({
   clock,
   mode,
   onMode,
+  onStop,
 }: {
   /** Run name, or the scenario dropdown when the source offers scenarios. */
   run: ReactNode;
@@ -36,6 +37,8 @@ export function TopBar({
   clock?: string;
   mode?: DashboardMode;
   onMode?(mode: DashboardMode): void;
+  /** Stops the live scenario (shown beside the clock pill while it runs). */
+  onStop?(): void;
 }) {
   const b = badge(origin, status, label);
   return (
@@ -58,6 +61,11 @@ export function TopBar({
         <span className="clock-pill">
           <span className="dot" aria-hidden /> {clock}
         </span>
+      )}
+      {clock && onStop && status.kind === 'ready' && (
+        <button className="stop-pill" onClick={onStop}>
+          ■ Stop
+        </button>
       )}
     </header>
   );

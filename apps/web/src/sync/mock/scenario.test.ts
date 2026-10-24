@@ -1,6 +1,6 @@
 /** Sample scenario invariants: determinism, contract shape, DAG order, no double-booking. */
 import { describe, expect, it } from 'vitest';
-import { MENU, makeTime, orderTime, simulate } from './scenario';
+import { MENU, makeTime, orderTime, simulate, DEFAULT_RUSH_GAP } from './scenario';
 import { checkRun } from '../../dashboard/model/normalize';
 import type { Policy } from '../contract';
 
@@ -149,8 +149,8 @@ describe('rush arrival gap (design/MOCK_AND_TEST_DESIGN.md §3.4)', () => {
       .map((j, i) => j.arrival - jobs[i].arrival);
   };
 
-  it('keeps the 14 s default, so the demo is unchanged', () => {
-    expect(simulate('sync', { seed: 3, rushGap: 14 })).toEqual(
+  it('uses DEFAULT_RUSH_GAP when no gap is given', () => {
+    expect(simulate('sync', { seed: 3, rushGap: DEFAULT_RUSH_GAP })).toEqual(
       simulate('sync', { seed: 3 }),
     );
   });

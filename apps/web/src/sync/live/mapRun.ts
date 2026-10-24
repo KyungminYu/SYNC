@@ -110,6 +110,9 @@ const TASK_LABEL: Record<string, string> = {
 
 const isRole = (r: string): r is Role => r in ROLE_TYPE;
 
+/** Engine tasks made once per drink; the others are once per order. */
+const DRINK_TASKS = new Set(['prepare_coffee', 'prepare_milk', 'assemble_drink']);
+
 /** "Latte ×2 + Black coffee" from the drink names. */
 function orderLabel(names: string[]) {
   const counts = new Map<string, number>();
@@ -212,8 +215,10 @@ export function mapRun(
     const arrival = Math.min(...orders.map((o) => o.arrivalTick));
     jobs.push({
       id: customerId,
+      // Drinks come from the cart key (any number per engine order); without
+      // one, fall back to one recipe per order.
       label: orderLabel(
-        items.length === orders.length
+        items.length >= orders.length
           ? items.map((i) => i.name)
           : orders.map((o) => o.recipe),
       ),
@@ -221,7 +226,7 @@ export function mapRun(
       deadline: Math.min(...orders.map((o) => o.deadlineTick)),
       value: 1,
       items:
-        items.length === orders.length
+        items.length >= orders.length
           ? items
           : orders.map((o) => ({ name: o.recipe, complexity: 'medium' })),
       serviceTaskId: '',
@@ -231,23 +236,54 @@ export function mapRun(
   const jobById = new Map(jobs.map((j) => [j.id, j]));
 
   // Tasks: ids "c7.capture_order.2" keep the customer first (scene reads it).
+  // An engine order holds one drink (older runs) or several: drink tasks
+  // (coffee, milk, assembly) are numbered by drink within the customer, the
+  // rest by order, so ids never collide in either shape.
   const tasks: Task[] = [];
   const taskId = new Map<string, string>();
   const taskRows = [...rows.tasks].sort((a, b) => (a.id < b.id ? -1 : 1));
+  /** Drinks per engine order = its coffee tasks (one per drink). */
+  const drinksOf = new Map<string, number>();
+  for (const r of taskRows)
+    if (r.kind === 'prepare_coffee')
+      drinksOf.set(String(r.orderId), (drinksOf.get(String(r.orderId)) ?? 0) + 1);
+  /** Drinks in the customer's earlier orders, and drinks per customer. */
+  const drinksBefore = new Map<string, number>();
+  const drinksTotal = new Map<string, number>();
+  for (const [, orders] of carts)
+    for (const o of orders) {
+      const customerId = orderInfo.get(String(o.id))![0];
+      const sofar = drinksTotal.get(customerId) ?? 0;
+      drinksBefore.set(String(o.id), sofar);
+      drinksTotal.set(customerId, sofar + Math.max(1, drinksOf.get(String(o.id)) ?? 1));
+    }
+  /** Current drink while walking an order's tasks in creation order. */
+  const drinkAt = new Map<string, number>();
   for (const r of taskRows) {
     const info = orderInfo.get(String(r.orderId));
     if (!info || !isRole(r.role)) continue;
     const [customerId, k, count] = info;
-    const id = `${customerId}.${r.kind}.${k + 1}`;
+    const key = String(r.orderId);
+    if (r.kind === 'prepare_coffee') drinkAt.set(key, (drinkAt.get(key) ?? -1) + 1);
+    const perDrink = DRINK_TASKS.has(r.kind);
+    const drink = (drinksBefore.get(key) ?? 0) + Math.max(0, drinkAt.get(key) ?? 0);
+    const total = drinksTotal.get(customerId) ?? count;
+    const single = (drinksOf.get(key) ?? 1) <= 1;
+    const id = perDrink
+      ? `${customerId}.${r.kind}.${drink + 1}`
+      : `${customerId}.${r.kind}.${k + 1}`;
+    // Drink tasks name their drink; order tasks only when the order is one drink.
+    const n = perDrink ? drink : single ? (drinksBefore.get(key) ?? 0) : undefined;
     const label =
-      (TASK_LABEL[r.kind] ?? r.kind) + (count > 1 ? ` (${k + 1}/${count})` : '');
+      (TASK_LABEL[r.kind] ?? r.kind) +
+      (n !== undefined && total > 1 ? ` (${n + 1}/${total})` : '');
     tasks.push({
       id,
       jobId: customerId,
       label,
       type: ROLE_TYPE[r.role],
       deps: [],
-      itemIndex: k,
+      ...(n === undefined ? {} : { itemIndex: n }),
     });
     taskId.set(String(r.id), id);
     const job = jobById.get(customerId)!;

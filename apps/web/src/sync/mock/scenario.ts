@@ -42,7 +42,7 @@ export interface ScenarioOptions {
    * that are not a positive number fall back to the default.
    */
   rushGap?: number;
-  /** Number of customers (orders). */
+  /** Number of customers (orders); default 24. */
   customers?: number;
   /** Fixed horizon T in simulated seconds, used by objective (20). */
   T?: number;
@@ -123,8 +123,18 @@ const SHORT_WORK: Record<ResourceType, string> = {
 };
 /** SYNC sample only: send a server to pickup when the drinks finish within this many seconds. */
 const PREPOSITION_WINDOW = 6;
+/**
+ * Arrival rate relative to the first sample (rush 14 s, later 17 s, 24
+ * customers). Raising it brings more customers, more often, over the same
+ * horizon T (e.g. 1.2 → 29 customers, 11.67 s / 14.17 s).
+ */
+const ARRIVAL_RATE = 1;
+/** Customers per run by default (24 × ARRIVAL_RATE, rounded). */
+export const DEFAULT_CUSTOMERS = Math.round(24 * ARRIVAL_RATE);
 /** Default seconds between arrivals during the morning rush (ScenarioOptions.rushGap). */
-export const DEFAULT_RUSH_GAP = 14;
+export const DEFAULT_RUSH_GAP = Math.round((14 / ARRIVAL_RATE) * 100) / 100;
+/** Seconds between arrivals after the rush. */
+const CALM_GAP = Math.round((17 / ARRIVAL_RATE) * 100) / 100;
 
 /** Small deterministic PRNG (LCG) so a seed always reproduces the same run. */
 export function rng(seed: number) {
@@ -176,7 +186,12 @@ interface SimAgent extends Agent {
  * busy primary agent that would still finish sooner, and pre-positions servers.
  */
 export function simulate(policy: Policy, options: ScenarioOptions): RunData {
-  const { seed, scenario = 'morning', customers = 24, T = 420 } = options;
+  const {
+    seed,
+    scenario = 'morning',
+    customers = DEFAULT_CUSTOMERS,
+    T = 420,
+  } = options;
   const rushGap =
     options.rushGap !== undefined &&
     Number.isFinite(options.rushGap) &&
@@ -196,7 +211,7 @@ export function simulate(policy: Policy, options: ScenarioOptions): RunData {
     const id = `c${i + 1}`;
     const rush = scenario === 'morning' && i < customers / 2;
     // Arrivals: tighter spacing during the morning rush, plus a little noise.
-    const arrival = round(i * (rush ? rushGap : 17) + random() * 4);
+    const arrival = round(i * (rush ? rushGap : CALM_GAP) + random() * 4);
     // Sample deadline rule. Provisional: ask the user before changing (late definition).
     const deadline = round(arrival + 90);
     // 1 item 55%, 2 items 30%, 3 items 15%.

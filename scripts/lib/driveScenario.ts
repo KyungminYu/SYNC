@@ -27,8 +27,14 @@ export interface DriveOptions {
   customers: ScenarioCustomer[];
   /** Serving trays per run (enough not to be a bottleneck). */
   trays?: number;
-  /** Wall-clock ms per tick; 200 = 5× real time. */
+  /**
+   * Global clock: wall-clock ms per tick (one scenario second). Tick n is due
+   * at start + n × tickMs; a late tick is caught up at once, so time never
+   * drifts. Default 1500 (the engine needs ~1.2 s per tick).
+   */
   tickMs?: number;
+  /** Called once with the global clock (start epoch ms, ms per tick) for viewers. */
+  onClock?(clock: { startedAt: number; tickMs: number }): void;
   /** Identities (hex) granted viewer access to the new runs. */
   viewers?: string[];
   /** Stops stepping (runs stay paused where they are). */
@@ -76,7 +82,7 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
     );
   const drinks = o.customers.reduce((n, c) => n + c.items.length, 0);
   if (!drinks || drinks > 100)
-    throw new Error('Scenario must contain 1�100 drinks per shop.');
+    throw new Error('Scenario must contain 1–100 drinks per shop.');
   if (
     o.customers.some(
       (c) =>
@@ -132,32 +138,49 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
   const status = (id: bigint) =>
     [...conn.db.uiRuns.iter()].find((r) => r.id === id);
   let closed = false;
+  // Tick timing, per phase in ms, to see where the clock gets uneven.
+  const timing = new TickTiming();
+  // The global clock all viewers follow: tick n is due at startedAt + n × tickMs.
+  const tickMs = o.tickMs ?? 1500;
+  const startedAt = Date.now();
+  o.onClock?.({ startedAt, tickMs });
+  // Viewers read it from this line too (the dev server forwards it).
+  log(`clock ${startedAt} ${tickMs}`);
   for (let tick = 0; !signal?.aborted; tick++) {
-    const started = Date.now();
+    timing.begin();
+    // Send this tick's orders in one go (calls keep their order on the
+    // connection) so a busy tick does not stall the clock for the dashboard.
+    const sends: Promise<void>[] = [];
     for (const c of arrivals.filter((c) => c.tick === tick))
       for (const runId of ids)
         for (const [k, item] of c.items.entries()) {
           const entry = menuByName(item.name);
           if (!entry) throw new Error(`No engine recipe for "${item.name}"`);
-          await conn.reducers.enqueueOrder({
-            runId,
-            externalKey: `${c.id}-${k + 1}`,
-            cartKey: cartKeyFor(c.id, c.items),
-            recipe: entry.recipe,
-            deadlineInTicks: DEADLINE_FROM_DOOR - WALK_IN,
-            value: 1,
-            priority: 0,
-            // The customer leaves with the drinks at once; the tray is free right away.
-            customerUseTicks: 0,
-          });
+          sends.push(
+            conn.reducers.enqueueOrder({
+              runId,
+              externalKey: `${c.id}-${k + 1}`,
+              cartKey: cartKeyFor(c.id, c.items),
+              recipe: entry.recipe,
+              deadlineInTicks: DEADLINE_FROM_DOOR - WALK_IN,
+              value: 1,
+              priority: 0,
+              // The customer leaves with the drinks at once; the tray is free right away.
+              customerUseTicks: 0,
+            }),
+          );
         }
+    await Promise.all(sends);
+    timing.mark('enqueue');
     if (!closed && tick >= lastArrival) {
       for (const runId of ids) await conn.reducers.closeArrivals({ runId });
       closed = true;
     }
     const open = ids.filter((id) => status(id)?.status !== 'completed');
     if (!open.length) break;
-    for (const runId of open) await conn.reducers.stepRun({ runId });
+    // Step both runs together, then wait until each has moved a tick.
+    await Promise.all(open.map((runId) => conn.reducers.stepRun({ runId })));
+    timing.mark('step');
     await until(
       () =>
         open.every((id) => {
@@ -168,6 +191,7 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
           : undefined,
       'scenario tick',
     );
+    timing.mark('confirm');
     if (tick > lastArrival + 10000)
       throw new Error(
         'Scenario stalled: inspect resource availability, budget, and task states.',
@@ -176,7 +200,51 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
       log(
         `tick ${tick}: ${ids.map((id) => `${id}=${status(id)?.status}`).join(' ')}`,
       );
-    await sleep(Math.max(0, (o.tickMs ?? 200) - (Date.now() - started)));
+    // How late this tick finished against the global clock (0 = on time).
+    timing.note('behind', Math.max(0, Date.now() - (startedAt + (tick + 1) * tickMs)));
+    // Wait for the next tick's due time on the global clock; when behind
+    // (the engine was slow), go on at once and catch up.
+    await sleep(Math.max(0, startedAt + (tick + 1) * tickMs - Date.now()));
+    timing.mark('sleep');
+    timing.end();
+    if (tick > 0 && tick % 60 === 0) log(timing.summary(`ticks ${tick - 59}-${tick}`));
   }
+  log(timing.summary('all ticks'));
   return { baseline: ids[0], sync: ids[1] };
+}
+
+/** Per-phase durations of each tick, summarised as p50 / p95 / max (ms). */
+class TickTiming {
+  private window: Record<string, number>[] = [];
+  private all: Record<string, number>[] = [];
+  private row: Record<string, number> = {};
+  private at = 0;
+  private start = 0;
+  begin() {
+    this.at = this.start = performance.now();
+    this.row = {};
+  }
+  note(name: string, value: number) {
+    this.row[name] = value;
+  }
+  mark(phase: string) {
+    const now = performance.now();
+    this.row[phase] = (this.row[phase] ?? 0) + (now - this.at);
+    this.at = now;
+  }
+  end() {
+    this.row.tick = performance.now() - this.start;
+    this.window.push(this.row);
+    this.all.push(this.row);
+  }
+  summary(label: string) {
+    const rows = label === 'all ticks' ? this.all : this.window;
+    this.window = [];
+    const stat = (k: string) => {
+      const v = rows.map((r) => r[k] ?? 0).sort((a, b) => a - b);
+      const q = (p: number) => v[Math.min(v.length - 1, Math.floor(p * v.length))] ?? 0;
+      return `${k} ${q(0.5).toFixed(0)}/${q(0.95).toFixed(0)}/${(v.at(-1) ?? 0).toFixed(0)}`;
+    };
+    return `timing ${label} (p50/p95/max ms): ${['tick', 'enqueue', 'step', 'confirm', 'sleep', 'behind'].map(stat).join(' · ')}`;
+  }
 }

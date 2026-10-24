@@ -1,4 +1,4 @@
-import type { ScenarioRunner } from '../runner';
+import type { RunnerClock, ScenarioRunner } from '../runner';
 import { SCENARIOS } from '../scenarioCatalog';
 
 /**
@@ -48,7 +48,26 @@ export class DevFeederRunner implements ScenarioRunner {
         throw new Error(
           status.lastLine || 'Scenario failed. Check the server logs.',
         );
-      if (status.state === 'completed') return;
+      // Completed, or stopped from the dashboard: either way the run is over.
+      if (status.state === 'completed' || status.state === 'stopped') return;
     }
+  }
+
+  async clock(): Promise<RunnerClock | undefined> {
+    const res = await fetch('/__dev/feed', { cache: 'no-store' });
+    if (!res.ok) return undefined;
+    const s = (await res.json()) as {
+      state: string;
+      scenario?: string;
+      clock?: { startedAt: number; tickMs: number };
+    };
+    return s.state === 'running' && s.scenario && s.clock
+      ? { scenario: s.scenario, ...s.clock }
+      : undefined;
+  }
+
+  async stop() {
+    const res = await fetch('/__dev/feed', { method: 'DELETE' });
+    if (!res.ok) throw new Error(`Stop request failed (${res.status}).`);
   }
 }

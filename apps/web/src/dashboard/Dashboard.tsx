@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Decision, Policy } from '../sync/contract';
-import type { ScenarioRunner } from '../sync/runner';
+import type { RunnerClock, ScenarioRunner } from '../sync/runner';
 import type { SyncSource } from '../sync/source';
 import { DecisionsPanel } from './components/DecisionsPanel';
 import { ScenarioPicker } from './components/ScenarioPicker';
@@ -54,7 +54,29 @@ export function Dashboard({
   // Time moves outside playback (the database) while a live run is running;
   // a finished scenario can be replayed with the normal controls.
   const externalClock = !!source.clockNote && live;
-  const playback = usePlayback(end, live ? end : undefined);
+  // Global clock of the scenario the runner is playing: live time is read
+  // from it (shared by everyone) instead of being guessed from arrivals.
+  const [clock, setClock] = useState<RunnerClock>();
+  useEffect(() => {
+    if (!live || !runner?.clock) return setClock(undefined);
+    let stop = false;
+    const read = () =>
+      runner.clock!().then(
+        (c) => !stop && setClock(c),
+        () => !stop && setClock(undefined),
+      );
+    void read();
+    const timer = setInterval(read, 2000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [live, runner]);
+  const playback = usePlayback(
+    end,
+    live ? end : undefined,
+    clock && clock.scenario === scenarioId ? clock : undefined,
+  );
   const [policy, setPolicy] = useState<Policy>('sync');
   const [filter, setFilter] = useState<DecisionFilter>('all');
   const [selected, setSelected] = useState<Decision>();
@@ -146,6 +168,7 @@ export function Dashboard({
                   await runner.start(id, viewer);
                 })
               }
+              onStop={runner?.stop && (() => runner.stop!())}
               footnote={
                 runner
                   ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); each scenario changes one lever.'
@@ -160,6 +183,7 @@ export function Dashboard({
         status={status}
         label={source.label}
         clock={externalClock ? source.clockNote : undefined}
+        onStop={runner?.stop && (() => void runner.stop!())}
         mode={mode}
         onMode={onMode}
       />
@@ -241,12 +265,9 @@ export function Dashboard({
             filter={filter}
             onFilter={setFilter}
             selectedId={selected?.id}
-            // Selecting a decision pauses playback and jumps to when it was made.
-            onSelect={(d) => {
-              setSelected(d);
-              playback.pause();
-              playback.seek(d.t);
-            }}
+            // Selecting a decision only opens its detail; time keeps going
+            // (no jump back, so the list does not shrink).
+            onSelect={setSelected}
           />
         </main>
       )}

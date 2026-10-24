@@ -509,8 +509,9 @@ export function sceneAt(
     const spot = c.spot !== undefined ? lanes.waitingSpots[c.spot] : undefined;
     let p: { x: number; y: number; walking: boolean };
     // Still outside, waiting for the one ahead to step in: not drawn
-    // (customers never stand stacked on the doorway).
-    if (c.stage === 'line' && t < c.entered!) return;
+    // (customers never stand stacked on the doorway). This holds even when a
+    // free register calls them straight away (group arrivals, two cashiers).
+    if ((c.stage === 'line' || c.stage === 'ordering') && t < c.entered!) return;
     if (c.stage === 'line') {
       // Standing in (or walking into) the line.
       inLine++;
@@ -540,7 +541,8 @@ export function sceneAt(
         { x: reg.x, y: lanes.counterY },
         reg,
       ];
-      p = walkAt(route, c.orderStart!, t);
+      // Called at once by a free register: the walk starts when they step in.
+      p = walkAt(route, Math.max(c.orderStart!, c.entered!), t);
     } else if (c.stage === 'waiting') {
       // From the register to the assigned spot, then stay there.
       const reg = counterAt(c.register);

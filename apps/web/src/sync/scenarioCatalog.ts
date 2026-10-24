@@ -7,7 +7,7 @@ import { MENU } from './menu';
  * provisional and live only here (design doc §7).
  *   -1 speed  — customers arrive faster (arrival times × factor)
  *   -2 volume — customers order more drinks
- *   -3 burst  — customers arrive in groups at the same moment
+ *   -3 stream — customers arrive back to back in groups (one every STREAM_GAP s)
  * Deadlines, recipes and the menu are unchanged.
  */
 
@@ -26,9 +26,12 @@ export interface ScenarioDef {
   arrivalFactor: number;
   /** Extra drinks per customer, as [share of customers, drinks added]. */
   extraDrinks: [number, number];
-  /** Customers arriving together (1 = one at a time). */
+  /** Customers per back-to-back stream (1 = arrivals unchanged). */
   groupSize: number;
 }
+
+/** Seconds between customers within one stream: they keep coming, never all at once. */
+export const STREAM_GAP = 2;
 
 const BASE = { arrivalFactor: 1, extraDrinks: [0, 0] as [number, number], groupSize: 1 };
 /** Lever strength per level: speed factor, extra drinks, group size. */
@@ -47,7 +50,7 @@ export const SCENARIOS: ScenarioDef[] = LOADS.flatMap((load) => {
   return [
     { ...BASE, id: `${load}-1`, load, n: 1 as const, description: `Faster arrivals ×${l.speed}`, arrivalFactor: l.speed },
     { ...BASE, id: `${load}-2`, load, n: 2 as const, description: `More drinks: ${drinks}`, extraDrinks: l.drinks },
-    { ...BASE, id: `${load}-3`, load, n: 3 as const, description: `Arrive in groups of ${l.group}`, groupSize: l.group },
+    { ...BASE, id: `${load}-3`, load, n: 3 as const, description: `Back-to-back streams of ${l.group} (${STREAM_GAP} s apart)`, groupSize: l.group },
   ];
 });
 
@@ -64,13 +67,16 @@ export interface ScenarioCustomer {
 export function applyScenario(def: ScenarioDef, base: ScenarioCustomer[]): ScenarioCustomer[] {
   const [share, add] = def.extraDrinks;
   return base.map((c, i) => {
-    // Groups arrive together, at the time of the group's first customer.
-    const lead = base[Math.floor(i / def.groupSize) * def.groupSize];
+    // A stream starts when its first customer would have come; the rest
+    // follow one after another, STREAM_GAP seconds apart.
+    const first = Math.floor(i / def.groupSize) * def.groupSize;
+    const lead = base[first];
     // Every (1/share)-th customer gets the extra drinks, alternating through the menu.
     const extra = share > 0 && i % Math.round(1 / share) === 0 ? add : 0;
     return {
       id: c.id,
-      arrival: Math.round(lead.arrival * def.arrivalFactor * 100) / 100,
+      arrival:
+        Math.round((lead.arrival * def.arrivalFactor + (i - first) * STREAM_GAP) * 100) / 100,
       items: [
         ...c.items,
         ...Array.from({ length: extra }, (_, k) => MENU[(i + k) % MENU.length]),

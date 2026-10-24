@@ -43,7 +43,9 @@ function flag(name: string, fallback: string) {
 const SEED = 5;
 const trays = Number(flag('trays', '12'));
 /** Wall-clock ms per tick: 200 ms = 5× real time (same as the engine clock). */
-const tickMs = Number(flag('ms', '200'));
+// Global clock: one scenario second per 1.5 s of wall time (the engine needs
+// ~1.2 s per tick, so it can keep up).
+const tickMs = Number(flag('ms', '1500'));
 const config = databaseConfig();
 const uri = flag('uri', config.uri);
 const database = flag('db', config.database);
@@ -58,6 +60,28 @@ if (!scenario)
   );
 
 mkdirSync('.local', { recursive: true });
+// One scenario at a time: a new feeder ends any feeder still running (from
+// the dashboard, a terminal or an earlier run) and takes over the pid file.
+const PID_FILE = '.local/feeder.pid';
+if (existsSync(PID_FILE)) {
+  const previous = Number(readFileSync(PID_FILE, 'utf8'));
+  if (previous && previous !== process.pid) {
+    try {
+      process.kill(previous, 'SIGTERM');
+      console.log(`stopped the previous feeder (pid ${previous})`);
+    } catch {
+      // Already gone.
+    }
+  }
+}
+writeFileSync(PID_FILE, String(process.pid));
+process.on('exit', () => {
+  // Leave the file to a newer feeder that took over.
+  if (existsSync(PID_FILE) && Number(readFileSync(PID_FILE, 'utf8')) === process.pid)
+    rmSync(PID_FILE, { force: true });
+});
+for (const signal of ['SIGTERM', 'SIGINT'] as const)
+  process.on(signal, () => process.exit(1));
 const scope = createHash('sha256')
   .update(`${uri}/${database}`)
   .digest('hex')

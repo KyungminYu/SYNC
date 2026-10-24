@@ -202,7 +202,11 @@ describe('lanes and waiting spots (design/FIGMA_GUIDE.md "손님 동선")', () =
     };
     const before = dist(leave.t - 0.01);
     const during = dist(leave.t + 0.1);
-    const after = dist(leave.t + 2);
+    // Look 2 s later, or just before `next` is called to a register itself.
+    const called = run.events.find(
+      (e) => e.type === 'task.started' && e.taskId === `${next.id}.order`,
+    )?.t;
+    const after = dist(Math.min(leave.t + 2, (called ?? Infinity) - 0.01));
     expect(during).toBeLessThan(before);
     expect(after).toBeLessThan(during + 1e-9);
   });
@@ -416,5 +420,37 @@ describe('long order lines', () => {
     // The tail ends on the door side, next to the entrance.
     expect(long.queuePath[long.queuePath.length - 1].x).toBeCloseTo(long.door.x);
     expect(long.ropes).toHaveLength(3);
+  });
+});
+
+describe('a group called straight to two free registers', () => {
+  // c1 and c2 arrive together and both start ordering the moment they arrive.
+  const base = normalizeRun(simulate('sync', { seed: 5 }));
+  const t1 = base.jobs.find((j) => j.id === 'c1')!.arrival;
+  const startOf = (job: string) =>
+    base.events.find(
+      (e) => e.type === 'task.started' && e.taskId === `${job}.order`,
+    )!.t;
+  const s1 = startOf('c1');
+  const group = normalizeRun({
+    ...base,
+    events: base.events.map((e) =>
+      e.type === 'job.arrived' && e.jobId === 'c2'
+        ? { ...e, t: t1 }
+        : e.type === 'task.started' && e.taskId === 'c2.order'
+          ? { ...e, t: s1, resourceId: 'reg2' }
+          : e,
+    ),
+  });
+  const lanes = buildLanes(group.layout);
+  const at = (t: number, id: string) =>
+    sceneAt(group, t, lanes).customers.find((c) => c.id === id);
+
+  it('still come in one after another, not side by side from the door', () => {
+    const t = Math.max(s1, t1) + 0.1;
+    const a = at(t, 'c1');
+    const b = at(t, 'c2');
+    if (a && b) expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(0.5);
+    else expect(b).toBeUndefined();
   });
 });
