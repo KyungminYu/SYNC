@@ -20,8 +20,9 @@ import type { DbConnection } from '../../packages/bindings/src';
  *   improves across runs instead of during one;
  * - at most MAX_CORRECTIONS more, only when orders fall at risk;
  * - numbers in, three numbers out, on a short system prompt;
- * - answers cached on disk by request: the same scenario history or the same
- *   (bucketed) situation never calls the API twice.
+ * - answers cached in memory by request (persisted to disk for later runs):
+ *   the same scenario history or the same (bucketed) situation never calls
+ *   the API twice.
  * Requests never block a tick. Each API call is reported through
  * `report_usage` (source "coordinator") as planning time.
  */
@@ -80,6 +81,20 @@ const clamp = (n: number, [lo, hi]: readonly [number, number]) =>
   Number.isFinite(n)
     ? Math.min(hi, Math.max(lo, Math.round(n * 100) / 100))
     : lo;
+/**
+ * Answers by request hash, in memory: filled once from the disk cache, read
+ * without touching the disk, and written through so the next feeder
+ * process (one per run) starts with every answer so far.
+ */
+let memory: Map<string, Weights> | undefined;
+const answers = () =>
+  (memory ??= new Map(
+    Object.entries(readJson<Record<string, Weights>>(CACHE_FILE, {})),
+  ));
+const remember = (key: string, w: Weights) => {
+  answers().set(key, w);
+  writeJson(CACHE_FILE, Object.fromEntries(answers()));
+};
 /** Coarse buckets so similar situations share a cache entry. */
 const bucket = (n: number) => (n <= 0 ? '0' : n <= 2 ? '1-2' : '3+');
 
@@ -216,8 +231,7 @@ export class LlmPlanner {
     const key = createHash('sha256')
       .update(JSON.stringify([MODEL, SYSTEM, prompt]))
       .digest('hex');
-    const cache = readJson<Record<string, Weights>>(CACHE_FILE, {});
-    let w = cache[key];
+    let w = answers().get(key);
     if (w) this.o.log(`llm planner: ${when} cache hit`);
     else {
       const started = performance.now();
@@ -233,8 +247,7 @@ export class LlmPlanner {
         return undefined;
       }
       w = response.parsed_output;
-      cache[key] = w;
-      writeJson(CACHE_FILE, cache);
+      remember(key, w);
       const ms = performance.now() - started;
       const u = response.usage;
       const inputTokens =
