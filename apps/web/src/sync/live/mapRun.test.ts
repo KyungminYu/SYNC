@@ -318,24 +318,18 @@ describe('one person per role and per slot', () => {
     expect(sceneAt(data, 16.5).agents.find((a) => a.id === 'cashier')?.state).toBe('idle');
   });
 
-  it('moves an idle person whose slot is taken to the nearest empty slot (SYNC)', () => {
-    // Server 1 collects a tray at the sink, where the idle cleaner stands.
-    const helped = normalizeRun(
+  it('keeps everyone at their post: the slot type owner takes its work (SYNC)', () => {
+    // The engine's server 1 collects a tray: the Cleaner does it at the sink,
+    // the Server stays at Pickup 1 (nobody walks, no slot waits for a walker).
+    const data = normalizeRun(
       mapRun(
         { ...rows, tasks: [...rows.tasks, task(11n, 'collect_tray', 'cleaner', 21n, 35, 37)] },
         'sync',
       ),
     );
-    const at = sceneAt(helped, 36).agents;
-    const server = at.find((a) => a.id === 'server')!;
-    const cleaner = at.find((a) => a.id === 'cleaner')!;
-    expect(server).toMatchObject({ state: 'working', helping: true, x: 14.5, y: 2.5 });
-    // No breaks: the cleaner holds the closest free slot in its row, Bar 2 (7.5, 2.5).
-    expect(cleaner).toMatchObject({ state: 'idle', x: 7.5, y: 2.5 });
-    expect(sceneAt(helped, 38).agents.find((a) => a.id === 'cleaner')).toMatchObject({
-      x: 14.5,
-      y: 2.5,
-    });
+    const at = sceneAt(data, 36).agents;
+    expect(at.find((a) => a.id === 'cleaner')).toMatchObject({ state: 'working', x: 14.5, y: 2.5 });
+    expect(at.find((a) => a.id === 'server')).toMatchObject({ state: 'idle', x: 11.5, y: 3.5 });
   });
 
   it('never moves Baseline staff; cross-role work is done at their own slot', () => {

@@ -408,42 +408,40 @@ export function mapRun(
     const freeSlot = (prefer?: string) =>
       choices.find((r) => r.id === prefer && (busyUntil.get(r.id) ?? 0) <= s) ??
       choices.find((r) => (busyUntil.get(r.id) ?? 0) <= s);
+    /**
+     * The free slot of this type a person works at: their own slot when it
+     * is of this type (the cashier stays at Register 1, whichever engine
+     * cashier the task names), else the free one nearest their own slot, so
+     * nobody is sent to a far slot while a customer waits there.
+     */
+    const slotFor = (id: string) => {
+      const own = homeOf(id);
+      const at = layout.resources.find((r) => r.id === own);
+      const free = choices.filter((r) => (busyUntil.get(r.id) ?? 0) <= s);
+      return (
+        free.find((r) => r.id === own) ??
+        free.sort(
+          (a, b) => Math.abs(a.x - (at?.x ?? 0)) - Math.abs(b.x - (at?.x ?? 0)),
+        )[0]
+      )?.id;
+    };
     let who = home.agentId;
     let station: string | undefined;
     if (fixed.has(who)) {
       // Baseline: everything is done at the person's own slot (no walking).
       station = isFree(who) ? homeOf(who) : agentAt.get(who);
-    } else if (isFree(who)) {
-      station = freeSlot(home.resourceId)?.id;
-    } else if (typeOf.get(agentAt.get(who)!) === type) {
-      // The role's second worker ran a task of the same kind at the same
-      // time: the one person works it at the slot they are already at.
-      station = agentAt.get(who);
     } else {
-      // Busy with something else: the task type's own person takes it, or
-      // joins the slot that person is working.
-      const owner = ownerOf(type);
-      if (owner && !fixed.has(owner) && isFree(owner)) {
-        who = owner;
-        station = freeSlot(homeOf(owner))?.id;
-      } else if (owner && typeOf.get(agentAt.get(owner) ?? '') === type) {
-        who = owner;
-        station = agentAt.get(owner);
-      } else {
-        // Its own person is helping elsewhere: an idle person takes it, else
-        // someone already working a slot of this type joins it.
-        const idle = layout.agents.find((a) => !fixed.has(a.id) && isFree(a.id));
-        const there = layout.agents.find(
-          (a) => typeOf.get(agentAt.get(a.id) ?? '') === type && !isFree(a.id),
-        );
-        if (idle) {
-          who = idle.id;
-          station = freeSlot()?.id;
-        } else if (there) {
-          who = there.id;
-          station = agentAt.get(there.id);
-        }
-      }
+      // Keep your post (Figma "Staff rules v5"): the slot type's own person
+      // takes it at their own slot, or — when busy — at the slot they are
+      // already working (always that type, since they never leave it). So
+      // nobody walks over to help and no slot runs while someone walks.
+      const owner = ownerOf(type) ?? who;
+      who = owner;
+      station = isFree(owner)
+        ? slotFor(owner)
+        : typeOf.get(agentAt.get(owner) ?? '') === type
+          ? agentAt.get(owner)
+          : undefined;
     }
     let onFloor = station !== undefined;
     if (!station) {
