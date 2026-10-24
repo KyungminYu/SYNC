@@ -91,3 +91,22 @@ export function LiveBanner({ note, tag = 'LIVE' }: { note: string; tag?: string 
     </div>
   );
 }
+
+/**
+ * No run yet (Figma "SYNC Dashboard · Empty (no scenario)"): the layout stays
+ * on screen and this line says how to get a run, using the source's hint.
+ */
+export function EmptyBanner({
+  hint,
+}: {
+  hint?: { message: string; command?: string };
+}) {
+  return (
+    <div className="sample-banner empty-banner" role="note">
+      <span className="tag">NO RUN</span>
+      {hint?.message ??
+        'No runs yet · Pick a scenario above. The empty shop is shown until the first run arrives.'}
+      {hint?.command && <code>{hint.command}</code>}
+    </div>
+  );
+}

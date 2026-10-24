@@ -7,7 +7,9 @@ import { ScenarioPicker } from './components/ScenarioPicker';
 import { Scorecard } from './components/Scorecard';
 import { ShopCard } from './components/ShopCard';
 import { Timeline, type Marker } from './components/Timeline';
+import { buildLayout } from '../sync/shopLayout';
 import {
+  EmptyBanner,
   LiveBanner,
   SampleBanner,
   TopBar,
@@ -22,6 +24,9 @@ import { useSyncSnapshot } from './useSyncSnapshot';
 
 /** Shared empty list, so memoised panels see the same array when there is no run. */
 const NONE: never[] = [];
+
+/** Shop drawn with nobody in it while there is no run (one cashier, barista, server, cleaner). */
+const DEFAULT_LAYOUT = buildLayout();
 
 /** The one-screen dashboard. Knows only the SyncSource port, never an adapter. */
 export function Dashboard({
@@ -105,9 +110,9 @@ export function Dashboard({
   const t = playback.t;
   // Both floors share one lane network sized for the busier run, so the two
   // cards keep the same board height (>10 waiting widens, >12 adds rows).
+  // Without a run the floors show the default shop, so the layout never disappears.
+  const layout = (sync ?? baseline)?.layout ?? DEFAULT_LAYOUT;
   const lanes = useMemo(() => {
-    const layout = (sync ?? baseline)?.layout;
-    if (!layout) return undefined;
     const capacity = Math.max(
       baseline ? peakWaiting(baseline) : 0,
       sync ? peakWaiting(sync) : 0,
@@ -119,7 +124,7 @@ export function Dashboard({
       sync ? peakLine(sync) : 0,
     );
     return buildLanes(layout, capacity, line);
-  }, [baseline, sync]);
+  }, [baseline, sync, layout]);
   // Both floors are drawn at the same time t.
   const scenes = {
     baseline: baseline ? sceneAt(baseline, t, lanes) : null,
@@ -239,8 +244,12 @@ export function Dashboard({
         mode={mode}
         onMode={onMode}
       />
-      {source.origin === 'sample' && <SampleBanner note={note} />}
-      {source.origin === 'live' && note && (
+      {!baseline && !sync && status.kind !== 'connecting' ? (
+        <EmptyBanner hint={emptyHint} />
+      ) : (
+        source.origin === 'sample' && <SampleBanner note={note} />
+      )}
+      {source.origin === 'live' && note && (baseline || sync) && (
         // Engine data: LIVE while something drives it, SAVED when replaying a finished pair.
         <LiveBanner note={note} tag={externalClock ? 'LIVE' : 'SAVED'} />
       )}
@@ -271,18 +280,9 @@ export function Dashboard({
         <main className="state-empty" aria-busy="true">
           Connecting to SYNC…
         </main>
-      ) : !baseline && !sync ? (
-        <main className="state-empty">
-          {emptyHint ? (
-            <div className="empty-hint">
-              <p>{emptyHint.message}</p>
-              {emptyHint.command && <code>{emptyHint.command}</code>}
-            </div>
-          ) : (
-            'No runs yet.'
-          )}
-        </main>
       ) : (
+        // No run yet still shows the full layout (empty shop, blank scores,
+        // no decisions); the empty banner above says how to get a run.
         <main className="body">
           <div className="left">
             <div className="shops">
@@ -290,6 +290,7 @@ export function Dashboard({
                 policy="baseline"
                 scene={scenes.baseline}
                 data={baseline ?? null}
+                layout={layout}
                 lanes={lanes}
                 timeRef={playback.timeRef}
                 highlight={highlight('baseline')}
@@ -298,6 +299,7 @@ export function Dashboard({
                 policy="sync"
                 scene={scenes.sync}
                 data={sync ?? null}
+                layout={layout}
                 lanes={lanes}
                 timeRef={playback.timeRef}
                 highlight={highlight('sync')}

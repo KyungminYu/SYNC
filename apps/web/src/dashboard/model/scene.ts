@@ -4,6 +4,7 @@
  * are always exact. No React, no Phaser, no scoring or scheduling logic.
  */
 import type {
+  Layout,
   ResourceType,
   Role,
   RunData,
@@ -620,6 +621,34 @@ export function sceneAt(
     customers: customerViews,
     done,
     late,
+  };
+}
+
+/**
+ * The shop with nobody in it: every slot idle, no staff, no customers, no
+ * ropes. Drawn when there is no run yet, so the floor keeps its layout
+ * instead of disappearing (Figma "SYNC Dashboard · Empty (no scenario)").
+ */
+export function emptyScene(layout: Layout, lanes: Lanes): Scene {
+  return {
+    t: 0,
+    zones: layout.zones,
+    lanes,
+    queueFolded: false,
+    lineLength: 0,
+    slots: layout.resources.map((r) => ({
+      id: r.id,
+      label: r.label,
+      type: r.type,
+      x: r.x,
+      y: r.y,
+      state: 'idle',
+      progress: null,
+    })),
+    agents: [],
+    customers: [],
+    done: 0,
+    late: 0,
   };
 }
 

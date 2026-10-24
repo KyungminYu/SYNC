@@ -1,4 +1,4 @@
-import type { Policy, RunData } from '../../sync/contract';
+import type { Layout, Policy, RunData } from '../../sync/contract';
 import type { Lanes } from '../model/lanes';
 import type { Scene } from '../model/scene';
 import { FloorCanvas } from '../floor/FloorCanvas';
@@ -14,6 +14,7 @@ export function ShopCard({
   policy,
   scene,
   data,
+  layout,
   lanes,
   timeRef,
   highlight,
@@ -23,6 +24,8 @@ export function ShopCard({
   scene: Scene | null;
   /** Run, lanes and precise time for the Phaser floor (drawn every frame). */
   data: RunData | null;
+  /** Shop drawn empty while there is no run. */
+  layout?: Layout;
   lanes: Lanes | undefined;
   timeRef: { current: number };
   highlight: Highlight;
@@ -48,6 +51,7 @@ export function ShopCard({
       </header>
       <FloorCanvas
         data={data}
+        layout={layout}
         lanes={lanes}
         timeRef={timeRef}
         highlight={highlight}

@@ -350,6 +350,22 @@ input:focus-visible {
   color: var(--text-primary);
   word-break: break-all;
 }
+/* No run yet: the hint's command sits inline in the banner and wraps below a long message. */
+.empty-banner {
+  flex-wrap: wrap;
+}
+.empty-banner .tag {
+  white-space: nowrap;
+}
+.empty-banner code {
+  word-break: break-all;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-primary);
+}
 .state-empty {
   display: grid;
   place-items: center;

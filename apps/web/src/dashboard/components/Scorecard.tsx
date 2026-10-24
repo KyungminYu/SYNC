@@ -120,7 +120,9 @@ export const Scorecard = memo(function Scorecard({
 
       <div className="terms">
         {TERMS.map((term) => {
-          const measured = present.some((s) => term.value(s) !== null);
+          // No run yet: empty bars with "—" (Figma empty state), not "Not measured".
+          const measured =
+            !present.length || present.some((s) => term.value(s) !== null);
           return (
             <div className="term" key={term.label}>
               <span className="sign" aria-hidden>
@@ -168,9 +170,11 @@ export const Scorecard = memo(function Scorecard({
         <p>
           {baseline && sync
             ? summary(baseline, sync)
-            : 'Single-run results; no baseline comparison yet.'}
+            : present.length
+              ? 'Single-run results; no baseline comparison yet.'
+              : 'No runs yet — scores fill in once a scenario starts.'}
         </p>
-        {(benchmark || seedLine) && (
+        {(benchmark || (seedLine && present.length > 0)) && (
           <span>
             {benchmark
               ? `${benchmark.seeds} seeds: ${benchmark.meanDiff >= 0 ? '+' : ''}${benchmark.meanDiff.toFixed(2)} orders (± ${benchmark.ci95.toFixed(2)})`

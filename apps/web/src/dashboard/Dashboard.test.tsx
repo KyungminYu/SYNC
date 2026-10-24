@@ -80,6 +80,18 @@ it('live without visible runs shows who to grant and the feeder command', () => 
   expect(screen.getByText('pnpm feed --viewer abc')).toBeTruthy();
   // Never the sample banner on live data.
   expect(screen.queryByText(/placeholders from the mock backend/)).toBeNull();
+  // The layout stays on screen: both empty shops, the scorecard and decisions.
+  expect(screen.getByLabelText('Baseline shop floor')).toBeTruthy();
+  expect(screen.getByLabelText('SYNC shop floor')).toBeTruthy();
+  expect(screen.getByText(/No runs yet — scores fill in/)).toBeTruthy();
+  expect(screen.getByText('No decisions yet at this time.')).toBeTruthy();
+});
+
+it('no run and no hint still shows the default layout with the empty banner', () => {
+  render(<Dashboard source={fakeLive({ status: { kind: 'ready' }, runs: {} })} />);
+  expect(screen.getByRole('note').textContent).toMatch(/^NO RUN/);
+  expect(screen.getByLabelText('Baseline shop floor')).toBeTruthy();
+  expect(screen.queryByText('Not measured')).toBeNull();
 });
 
 it('live runs hide playback controls and the seed comparison', async () => {

@@ -1,21 +1,24 @@
 import { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
-import type { RunData } from '../../sync/contract';
+import type { Layout, RunData } from '../../sync/contract';
 import type { Lanes } from '../model/lanes';
-import { sceneAt, type Scene } from '../model/scene';
+import { emptyScene, sceneAt, type Scene } from '../model/scene';
 import { FloorScene, type FloorInput, type Highlight } from './FloorScene';
 import { floorTheme, FLOOR_PX, GRID } from './theme';
 
 /** React host for one Phaser floor. Hands state over by ref, never re-creates the game. */
 export function FloorCanvas({
   data,
+  layout,
   lanes,
   timeRef,
   highlight,
   label,
 }: {
-  /** The run to draw; null shows an empty board. */
+  /** The run to draw; null shows the empty shop (or a blank board without `layout`). */
   data: RunData | null;
+  /** Shop drawn with nobody in it while there is no run. */
+  layout?: Layout;
   lanes: Lanes | undefined;
   /** Precise playback time, read every frame (not through React renders). */
   timeRef: { current: number };
@@ -31,11 +34,17 @@ export function FloorCanvas({
     scene: Scene | null;
   } | null>(null);
   const sceneNow = () => {
-    if (!data || !lanes) return null;
+    if (!lanes) return null;
     const t = timeRef.current;
     const c = cache.current;
     if (c && c.t === t && c.data === data) return c.scene;
-    const scene = sceneAt(data, t, lanes);
+    // No run: the empty shop does not change with time, but caching keeps
+    // Phaser from rebuilding it every frame.
+    const scene = data
+      ? sceneAt(data, t, lanes)
+      : layout
+        ? emptyScene(layout, lanes)
+        : null;
     cache.current = { t, data, scene };
     return scene;
   };
