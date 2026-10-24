@@ -95,8 +95,10 @@ export function scenariosOf(runs: RunRow[], completedOnly = false): Scenario[] {
   for (const s of byId.values()) {
     if (completedOnly && !done(s)) continue;
     // Only whole Baseline/SYNC pairs: while a pair is being set up, half of
-    // it would show one empty floor (and hide the previous pair).
-    if (!s.runs.baseline || !s.runs.sync) continue;
+    // it would show one empty floor (and hide the previous pair). External
+    // worker runs are a single SYNC run by design.
+    if (s.load !== 'External workers' && (!s.runs.baseline || !s.runs.sync))
+      continue;
     const old = latest.get(s.id);
     if (!old || newestId(s) > newestId(old)) latest.set(s.id, s);
   }
