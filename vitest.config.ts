@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     include: [
       'packages/**/*.test.ts',
-      'spacetimedb/**/*.test.ts',
+      'spacetimedb/tests/*.module.test.ts',
       'apps/**/*.test.{ts,tsx}',
     ],
     environment: 'node',

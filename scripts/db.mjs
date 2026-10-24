@@ -33,7 +33,7 @@ const args = {
   ],
   publish: [
     'publish',
-    'sync-local',
+    'sync-coffee-dev',
     '--server',
     'http://127.0.0.1:3000',
     '--module-path',
@@ -41,7 +41,7 @@ const args = {
     '--yes=skip-login',
     '--delete-data=never',
   ],
-  logs: ['logs', 'sync-local', '--server', 'http://127.0.0.1:3000'],
+  logs: ['logs', 'sync-coffee-dev', '--server', 'http://127.0.0.1:3000'],
   start: [
     'start',
     '--listen-addr',

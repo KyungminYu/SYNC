@@ -11,5 +11,6 @@ import {
 } from "spacetimedb";
 
 export default {
+  runId: __t.u64(),
   jobId: __t.u64(),
 };

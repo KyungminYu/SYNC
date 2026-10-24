@@ -1,105 +1,125 @@
+/** Explicit opt-in verification against a real local host. Never run by dev/build. */
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { DbConnection } from '../packages/bindings/src';
-import { Identity } from 'spacetimedb';
-const connections: DbConnection[] = [];
-async function connect(token?: string) {
+const clients: DbConnection[] = [];
+async function connect(queries: string[]) {
   return new Promise<DbConnection>((resolve, reject) => {
-    const connection = DbConnection.builder()
+    const timer = setTimeout(
+      () => reject(new Error('Database connection timed out')),
+      10000,
+    );
+    const client = DbConnection.builder()
       .withUri('http://127.0.0.1:3000')
-      .withDatabaseName('sync-local')
-      .withToken(token)
-      .onConnect((conn, _identity, authToken) => {
-        if (!token) {
-          mkdirSync('.local', { recursive: true });
-          writeFileSync('.local/integration-controller-token', authToken, {
-            mode: 0o600,
-          });
-        }
+      .withDatabaseName('sync-coffee-dev')
+      .onConnect((conn) => {
         conn
           .subscriptionBuilder()
-          .onApplied(() => resolve(conn))
-          .onError((ctx) => reject(ctx.event))
-          .subscribeToAllTables();
+          .onApplied(() => {
+            clearTimeout(timer);
+            resolve(conn);
+          })
+          .onError((ctx) => {
+            clearTimeout(timer);
+            reject(ctx.event);
+          })
+          .subscribe(queries);
       })
-      .onConnectError((_ctx, error) => reject(error))
+      .onConnectError((_ctx, error) => {
+        clearTimeout(timer);
+        reject(error);
+      })
       .build();
-    connections.push(connection);
+    clients.push(client);
   });
 }
-async function until(predicate: () => boolean, timeout = 45000) {
-  const end = Date.now() + timeout;
+async function until(predicate: () => boolean) {
+  const end = Date.now() + 45000;
   while (!predicate()) {
-    if (Date.now() > end)
-      throw new Error('Timed out waiting for deterministic lifecycle');
-    await new Promise((r) => setTimeout(r, 100));
+    if (Date.now() > end) throw new Error('Subscription/lifecycle timed out');
+    await new Promise((r) => setTimeout(r, 50));
   }
 }
+const queries = [
+  'SELECT * FROM ui_runs',
+  'SELECT * FROM ui_orders',
+  'SELECT * FROM ui_resources',
+  'SELECT * FROM ui_trays',
+  'SELECT * FROM ui_metrics',
+  'SELECT * FROM ui_policy_catalog',
+];
 try {
-  const health = await fetch('http://127.0.0.1:3001/ready');
-  assert.equal(health.status, 200, 'Start pnpm dev:agents first');
-  const serviceIdentity = Identity.fromString(
-    readFileSync('.local/agent-identity', 'utf8'),
-  );
-  const token = existsSync('.local/integration-controller-token')
-    ? readFileSync('.local/integration-controller-token', 'utf8')
-    : undefined;
-  const controller = await connect(token);
-  const previous = new Set([...controller.db.run.iter()].map((r) => r.id));
-  await controller.reducers.createDemoRun({
+  const owner = await connect(queries),
+    stranger = await connect(queries);
+  assert.equal([...owner.db.uiPolicyCatalog.iter()].length, 6);
+  await owner.reducers.createRun({
+    name: 'Integration verification',
     seed: 42,
-    policy: 'resource-aware',
+    trayCount: 2,
+    mode: 'deterministic',
+    budgetMicrousd: undefined,
   });
+  await until(() => [...owner.db.uiRuns.iter()].length === 1);
+  const runId = [...owner.db.uiRuns.iter()][0].id;
+  assert.equal([...stranger.db.uiRuns.iter()].length, 0);
+  await assert.rejects(
+    stranger.reducers.setRunStatus({ runId, running: true }),
+  );
+  await owner.reducers.grantMember({
+    runId,
+    identity: stranger.identity!,
+    permission: 'viewer',
+    enabled: true,
+  });
+  await until(() => [...stranger.db.uiRuns.iter()].length === 1);
+  await assert.rejects(
+    stranger.reducers.setRunStatus({ runId, running: true }),
+  );
+  for (const recipe of ['black_coffee', 'latte'])
+    await owner.reducers.enqueueOrder({
+      runId,
+      externalKey: recipe,
+      recipe,
+      deadlineInTicks: 120,
+      value: 10,
+      priority: 1,
+      customerUseTicks: 2,
+    });
+  await owner.reducers.closeArrivals({ runId });
+  await owner.reducers.setRunStatus({ runId, running: true });
   await until(() =>
-    [...controller.db.run.iter()].some((r) => !previous.has(r.id)),
-  );
-  const run = [...controller.db.run.iter()].find((r) => !previous.has(r.id))!;
-  await controller.reducers.registerService({
-    runId: run.id,
-    identity: serviceIdentity,
-  });
-  await controller.reducers.startRun({ runId: run.id });
-  await until(() => controller.db.run.id.find(run.id)?.status === 'complete');
-  const tasks = [...controller.db.task.iter()].filter(
-      (t) => t.runId === run.id,
+    [...owner.db.uiRuns.iter()].some(
+      (r) => r.id === runId && r.status === 'completed',
     ),
-    events = [...controller.db.executionEvent.iter()].filter(
-      (e) => e.runId === run.id,
-    );
-  assert.equal(tasks.length, 8);
-  assert(tasks.every((t) => t.state === 'succeeded'));
+  );
   assert.equal(
-    [...controller.db.reservation.iter()].filter((r) => r.runId === run.id)
-      .length,
-    0,
+    [...owner.db.uiOrders.iter()].filter(
+      (o) => o.runId === runId && o.status === 'cleaned',
+    ).length,
+    2,
   );
-  assert(
-    [...controller.db.worker.iter()]
-      .filter((w) => w.runId === run.id)
-      .every((w) => w.taskId === undefined),
-  );
-  for (const task of tasks)
-    assert.equal(
-      events.filter((e) => e.taskId === task.id && e.kind === 'COMPLETED')
-        .length,
-      1,
-    );
-  assert(
-    [...controller.db.agentJob.iter()]
-      .filter((j) => j.runId === run.id)
-      .every(
-        (j) => j.state === 'accepted' && j.claimant?.isEqual(serviceIdentity),
-      ),
+  assert([...owner.db.uiResources.iter()].every((r) => r.reservedUnits === 0));
+  assert.equal([...owner.db.uiMetrics.iter()][0].deliveredOrders, 2);
+  await owner.reducers.grantMember({
+    runId,
+    identity: stranger.identity!,
+    permission: 'viewer',
+    enabled: false,
+  });
+  await until(
+    () =>
+      [...stranger.db.uiRuns.iter()].length === 0 &&
+      [...stranger.db.uiOrders.iter()].length === 0,
   );
   console.log(
     JSON.stringify({
       integration: 'passed',
-      runId: run.id.toString(),
-      completed: tasks.length,
-      tick: controller.db.run.id.find(run.id)!.tick,
-      reservations: 0,
+      runId: runId.toString(),
+      cleanedOrders: 2,
+      policies: 6,
+      identityIsolation: true,
+      revocation: true,
     }),
   );
 } finally {
-  for (const c of connections) c.disconnect();
+  for (const client of clients) client.disconnect();
 }

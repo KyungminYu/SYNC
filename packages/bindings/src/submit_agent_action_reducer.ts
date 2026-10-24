@@ -11,8 +11,8 @@ import {
 } from "spacetimedb";
 
 export default {
+  runId: __t.u64(),
   jobId: __t.u64(),
-  taskId: __t.u64(),
   attempt: __t.u32(),
   action: __t.string(),
 };

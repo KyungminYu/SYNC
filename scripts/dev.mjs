@@ -1,7 +1,7 @@
 import concurrently from 'concurrently';
 try {
   const r = await fetch(
-    'http://127.0.0.1:3000/v1/database/sync-local/identity',
+    'http://127.0.0.1:3000/v1/database/sync-coffee-dev/identity',
   );
   if (!r.ok) throw new Error('Database not published');
 } catch {
@@ -11,7 +11,7 @@ try {
   process.exit(1);
 }
 console.log(
-  'Database available. Agent identity will be printed for controller registration.',
+  'Database available. UI and agent integration placeholders are starting.',
 );
 const { result } = concurrently(
   [

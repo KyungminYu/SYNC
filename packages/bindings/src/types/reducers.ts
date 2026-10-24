@@ -7,22 +7,30 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import ClaimAgentJobReducer from "../claim_agent_job_reducer";
-import CreateDemoRunReducer from "../create_demo_run_reducer";
+import CloseArrivalsReducer from "../close_arrivals_reducer";
+import CreateRunReducer from "../create_run_reducer";
+import EnqueueOrderReducer from "../enqueue_order_reducer";
+import GrantMemberReducer from "../grant_member_reducer";
 import MarkJobUncertainReducer from "../mark_job_uncertain_reducer";
-import PauseRunReducer from "../pause_run_reducer";
-import RegisterServiceReducer from "../register_service_reducer";
-import ResetRunReducer from "../reset_run_reducer";
-import ScheduleReadyTasksReducer from "../schedule_ready_tasks_reducer";
-import StartRunReducer from "../start_run_reducer";
+import ReconcileJobReducer from "../reconcile_job_reducer";
+import ReportUsageReducer from "../report_usage_reducer";
+import SetPolicyReducer from "../set_policy_reducer";
+import SetResourceAvailableReducer from "../set_resource_available_reducer";
+import SetRunStatusReducer from "../set_run_status_reducer";
+import StepRunReducer from "../step_run_reducer";
 import SubmitAgentActionReducer from "../submit_agent_action_reducer";
 
 export type ClaimAgentJobParams = __Infer<typeof ClaimAgentJobReducer>;
-export type CreateDemoRunParams = __Infer<typeof CreateDemoRunReducer>;
+export type CloseArrivalsParams = __Infer<typeof CloseArrivalsReducer>;
+export type CreateRunParams = __Infer<typeof CreateRunReducer>;
+export type EnqueueOrderParams = __Infer<typeof EnqueueOrderReducer>;
+export type GrantMemberParams = __Infer<typeof GrantMemberReducer>;
 export type MarkJobUncertainParams = __Infer<typeof MarkJobUncertainReducer>;
-export type PauseRunParams = __Infer<typeof PauseRunReducer>;
-export type RegisterServiceParams = __Infer<typeof RegisterServiceReducer>;
-export type ResetRunParams = __Infer<typeof ResetRunReducer>;
-export type ScheduleReadyTasksParams = __Infer<typeof ScheduleReadyTasksReducer>;
-export type StartRunParams = __Infer<typeof StartRunReducer>;
+export type ReconcileJobParams = __Infer<typeof ReconcileJobReducer>;
+export type ReportUsageParams = __Infer<typeof ReportUsageReducer>;
+export type SetPolicyParams = __Infer<typeof SetPolicyReducer>;
+export type SetResourceAvailableParams = __Infer<typeof SetResourceAvailableReducer>;
+export type SetRunStatusParams = __Infer<typeof SetRunStatusReducer>;
+export type StepRunParams = __Infer<typeof StepRunReducer>;
 export type SubmitAgentActionParams = __Infer<typeof SubmitAgentActionReducer>;
 

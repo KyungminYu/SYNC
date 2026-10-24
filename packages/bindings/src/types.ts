@@ -10,116 +10,447 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export const AgentJob = __t.object("AgentJob", {
+export const ServiceJobPayload = __t.object("ServiceJobPayload", {
+  key: __t.string(),
   id: __t.u64(),
   runId: __t.u64(),
   taskId: __t.u64(),
   workerId: __t.u64(),
   attempt: __t.u32(),
-  state: __t.string(),
-  claimant: __t.option(__t.identity()),
-});
-export type AgentJob = __Infer<typeof AgentJob>;
-
-export const Decision = __t.object("Decision", {
-  id: __t.u64(),
-  runId: __t.u64(),
-  tick: __t.u32(),
-  taskId: __t.u64(),
-  workerId: __t.u64(),
-  reason: __t.string(),
-});
-export type Decision = __Infer<typeof Decision>;
-
-export const Dependency = __t.object("Dependency", {
-  id: __t.u64(),
-  runId: __t.u64(),
-  taskId: __t.u64(),
-  prerequisiteId: __t.u64(),
-});
-export type Dependency = __Infer<typeof Dependency>;
-
-export const ExecutionEvent = __t.object("ExecutionEvent", {
-  id: __t.u64(),
-  runId: __t.u64(),
-  tick: __t.u32(),
-  taskId: __t.option(__t.u64()),
-  attempt: __t.u32(),
-  kind: __t.string(),
-});
-export type ExecutionEvent = __Infer<typeof ExecutionEvent>;
-
-export const Reservation = __t.object("Reservation", {
-  id: __t.u64(),
-  runId: __t.u64(),
-  taskId: __t.u64(),
-  attempt: __t.u32(),
-  resourceId: __t.u64(),
-  units: __t.u32(),
-});
-export type Reservation = __Infer<typeof Reservation>;
-
-export const Resource = __t.object("Resource", {
-  id: __t.u64(),
-  runId: __t.u64(),
-  label: __t.string(),
-  capacity: __t.u32(),
-});
-export type Resource = __Infer<typeof Resource>;
-
-export const Run = __t.object("Run", {
-  id: __t.u64(),
-  seed: __t.u32(),
-  policy: __t.string(),
-  tick: __t.u32(),
   status: __t.string(),
-  controller: __t.identity(),
+  mine: __t.bool(),
+  expectedAction: __t.string(),
+  observationJson: __t.string(),
 });
-export type Run = __Infer<typeof Run>;
+export type ServiceJobPayload = __Infer<typeof ServiceJobPayload>;
 
-export const ServiceRegistration = __t.object("ServiceRegistration", {
-  id: __t.u64(),
-  runId: __t.u64(),
-  identity: __t.identity(),
-});
-export type ServiceRegistration = __Infer<typeof ServiceRegistration>;
+export const ServiceJobs = __t.object("ServiceJobs", {});
+export type ServiceJobs = __Infer<typeof ServiceJobs>;
 
-export const SimulationSchedule = __t.object("SimulationSchedule", {
+export const SyncClock = __t.object("SyncClock", {
   scheduledId: __t.u64(),
   scheduledAt: __t.scheduleAt(),
   runId: __t.u64(),
 });
-export type SimulationSchedule = __Infer<typeof SimulationSchedule>;
+export type SyncClock = __Infer<typeof SyncClock>;
 
-export const Task = __t.object("Task", {
+export const SyncDecisions = __t.object("SyncDecisions", {
+  key: __t.string(),
   id: __t.u64(),
   runId: __t.u64(),
-  label: __t.string(),
-  state: __t.string(),
-  capabilities: __t.array(__t.string()),
-  duration: __t.u32(),
-  release: __t.u32(),
-  deadline: __t.option(__t.u32()),
+  sequence: __t.u64(),
+  tick: __t.u32(),
+  policy: __t.string(),
+  taskId: __t.u64(),
+  workerId: __t.u64(),
   attempt: __t.u32(),
-  startedAt: __t.option(__t.u32()),
+  score: __t.f64(),
+  reasonCodes: __t.array(__t.string()),
+  snapshotVersion: __t.u64(),
 });
-export type Task = __Infer<typeof Task>;
+export type SyncDecisions = __Infer<typeof SyncDecisions>;
 
-export const TaskRequirement = __t.object("TaskRequirement", {
+export const SyncDependencies = __t.object("SyncDependencies", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  orderId: __t.u64(),
+  predecessorId: __t.u64(),
+  successorId: __t.u64(),
+});
+export type SyncDependencies = __Infer<typeof SyncDependencies>;
+
+export const SyncEvents = __t.object("SyncEvents", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  sequence: __t.u64(),
+  tick: __t.u32(),
+  type: __t.string(),
+  taskId: __t.option(__t.u64()),
+  orderId: __t.option(__t.u64()),
+  workerId: __t.option(__t.u64()),
+  attempt: __t.option(__t.u32()),
+  detail: __t.string(),
+});
+export type SyncEvents = __Infer<typeof SyncEvents>;
+
+export const SyncJobs = __t.object("SyncJobs", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  taskId: __t.u64(),
+  workerId: __t.u64(),
+  attempt: __t.u32(),
+  status: __t.string(),
+  claimantIdentityHex: __t.option(__t.string()),
+  claimedTick: __t.option(__t.u32()),
+  submittedTick: __t.option(__t.u32()),
+  expectedAction: __t.string(),
+  observationJson: __t.string(),
+  reservedCostMicrousd: __t.u64(),
+});
+export type SyncJobs = __Infer<typeof SyncJobs>;
+
+export const SyncMembers = __t.object("SyncMembers", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  identityHex: __t.string(),
+  permission: __t.string(),
+  enabled: __t.bool(),
+});
+export type SyncMembers = __Infer<typeof SyncMembers>;
+
+export const SyncOrders = __t.object("SyncOrders", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  externalKey: __t.string(),
+  recipe: __t.string(),
+  arrivalTick: __t.u32(),
+  deadlineTick: __t.u32(),
+  value: __t.u32(),
+  priority: __t.u32(),
+  customerUseTicks: __t.u32(),
+  status: __t.string(),
+  deliveredTick: __t.option(__t.u32()),
+  customerReleaseTick: __t.option(__t.u32()),
+  cleanupCompletedTick: __t.option(__t.u32()),
+  trayId: __t.option(__t.u64()),
+});
+export type SyncOrders = __Infer<typeof SyncOrders>;
+
+export const SyncRequirements = __t.object("SyncRequirements", {
+  key: __t.string(),
   id: __t.u64(),
   runId: __t.u64(),
   taskId: __t.u64(),
   resourceId: __t.u64(),
   units: __t.u32(),
 });
-export type TaskRequirement = __Infer<typeof TaskRequirement>;
+export type SyncRequirements = __Infer<typeof SyncRequirements>;
 
-export const Worker = __t.object("Worker", {
+export const SyncReservations = __t.object("SyncReservations", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  taskId: __t.u64(),
+  workerId: __t.u64(),
+  attempt: __t.u32(),
+  resourceId: __t.u64(),
+  units: __t.u32(),
+});
+export type SyncReservations = __Infer<typeof SyncReservations>;
+
+export const SyncResources = __t.object("SyncResources", {
+  key: __t.string(),
   id: __t.u64(),
   runId: __t.u64(),
   label: __t.string(),
-  capabilities: __t.array(__t.string()),
-  taskId: __t.option(__t.u64()),
+  role: __t.string(),
+  capacity: __t.u32(),
+  available: __t.bool(),
 });
-export type Worker = __Infer<typeof Worker>;
+export type SyncResources = __Infer<typeof SyncResources>;
+
+export const SyncRun = __t.object("SyncRun", {
+  id: __t.u64(),
+  ownerIdentityHex: __t.string(),
+  name: __t.string(),
+  seed: __t.u32(),
+  tick: __t.u32(),
+  status: __t.string(),
+  arrivalsClosed: __t.bool(),
+  mode: __t.string(),
+  version: __t.u64(),
+  nextId: __t.u64(),
+  eventSequence: __t.u64(),
+  policyJson: __t.string(),
+  maxOrders: __t.u32(),
+  budgetMicrousd: __t.option(__t.u64()),
+  modeledSpentMicrousd: __t.u64(),
+  reservedMicrousd: __t.u64(),
+});
+export type SyncRun = __Infer<typeof SyncRun>;
+
+export const SyncTasks = __t.object("SyncTasks", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  orderId: __t.u64(),
+  kind: __t.string(),
+  role: __t.string(),
+  status: __t.string(),
+  releaseTick: __t.u32(),
+  deadlineTick: __t.option(__t.u32()),
+  durationTicks: __t.u32(),
+  priority: __t.u32(),
+  value: __t.u32(),
+  requiredCapabilities: __t.array(__t.string()),
+  estimatedCostMicrousd: __t.u64(),
+  attempt: __t.u32(),
+  workerId: __t.option(__t.u64()),
+  startedTick: __t.option(__t.u32()),
+  finishedTick: __t.option(__t.u32()),
+  finishAtTick: __t.option(__t.u32()),
+  customerReleaseGuard: __t.bool(),
+  trayMode: __t.string(),
+  errorCode: __t.option(__t.string()),
+});
+export type SyncTasks = __Infer<typeof SyncTasks>;
+
+export const SyncTelemetry = __t.object("SyncTelemetry", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  externalKey: __t.string(),
+  taskId: __t.option(__t.u64()),
+  attempt: __t.option(__t.u32()),
+  source: __t.string(),
+  inputTokens: __t.u64(),
+  outputTokens: __t.u64(),
+  reportedCostMicrousd: __t.u64(),
+  wallMilliseconds: __t.f64(),
+  reporterIdentityHex: __t.string(),
+});
+export type SyncTelemetry = __Infer<typeof SyncTelemetry>;
+
+export const SyncTrays = __t.object("SyncTrays", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  state: __t.string(),
+  orderId: __t.option(__t.u64()),
+});
+export type SyncTrays = __Infer<typeof SyncTrays>;
+
+export const SyncWorkers = __t.object("SyncWorkers", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  label: __t.string(),
+  role: __t.string(),
+  capabilities: __t.array(__t.string()),
+  enabled: __t.bool(),
+  speedFactor: __t.f64(),
+  currentTaskId: __t.option(__t.u64()),
+  currentAttempt: __t.option(__t.u32()),
+  x: __t.f64(),
+  y: __t.f64(),
+});
+export type SyncWorkers = __Infer<typeof SyncWorkers>;
+
+export const UiDagEdgePayload = __t.object("UiDagEdgePayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  orderId: __t.u64(),
+  fromTaskId: __t.u64(),
+  toTaskId: __t.u64(),
+});
+export type UiDagEdgePayload = __Infer<typeof UiDagEdgePayload>;
+
+export const UiDagEdges = __t.object("UiDagEdges", {});
+export type UiDagEdges = __Infer<typeof UiDagEdges>;
+
+export const UiDecisionPayload = __t.object("UiDecisionPayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  sequence: __t.u64(),
+  tick: __t.u32(),
+  policy: __t.string(),
+  taskId: __t.u64(),
+  workerId: __t.u64(),
+  attempt: __t.u32(),
+  score: __t.f64(),
+  reasonCodes: __t.array(__t.string()),
+  snapshotVersion: __t.u64(),
+});
+export type UiDecisionPayload = __Infer<typeof UiDecisionPayload>;
+
+export const UiDecisions = __t.object("UiDecisions", {});
+export type UiDecisions = __Infer<typeof UiDecisions>;
+
+export const UiEventPayload = __t.object("UiEventPayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  sequence: __t.u64(),
+  tick: __t.u32(),
+  eventType: __t.string(),
+  detail: __t.string(),
+  taskId: __t.option(__t.u64()),
+  orderId: __t.option(__t.u64()),
+  workerId: __t.option(__t.u64()),
+  attempt: __t.option(__t.u32()),
+});
+export type UiEventPayload = __Infer<typeof UiEventPayload>;
+
+export const UiEvents = __t.object("UiEvents", {});
+export type UiEvents = __Infer<typeof UiEvents>;
+
+export const UiMetrics = __t.object("UiMetrics", {});
+export type UiMetrics = __Infer<typeof UiMetrics>;
+
+export const UiMetricsPayload = __t.object("UiMetricsPayload", {
+  runId: __t.u64(),
+  tick: __t.u32(),
+  ordersReceived: __t.u32(),
+  deliveredOrders: __t.u32(),
+  onTimeOrders: __t.u32(),
+  cleanedOrders: __t.u32(),
+  unfinishedOrders: __t.u32(),
+  lateOpenOrders: __t.u32(),
+  latencySumTicks: __t.u64(),
+  latencyCount: __t.u32(),
+  meanDeliveryTicks: __t.option(__t.f64()),
+  completedValue: __t.u64(),
+  onTimeValue: __t.u64(),
+  completedTasks: __t.u32(),
+  readyTasks: __t.u32(),
+  busyWorkers: __t.u32(),
+  totalWorkers: __t.u32(),
+  dirtyOrInUseTrays: __t.u32(),
+  modeledSpentMicrousd: __t.u64(),
+  reservedMicrousd: __t.u64(),
+  modeledBudgetMicrousd: __t.option(__t.u64()),
+  reportedAnthropicCostMicrousd: __t.u64(),
+  inputTokens: __t.u64(),
+  outputTokens: __t.u64(),
+  reportedCoordinatorMs: __t.f64(),
+  coordinatorSampleCount: __t.u32(),
+  assignmentCount: __t.u32(),
+});
+export type UiMetricsPayload = __Infer<typeof UiMetricsPayload>;
+
+export const UiOrderPayload = __t.object("UiOrderPayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  recipe: __t.string(),
+  status: __t.string(),
+  arrivalTick: __t.u32(),
+  deadlineTick: __t.u32(),
+  value: __t.u32(),
+  priority: __t.u32(),
+  deliveredTick: __t.option(__t.u32()),
+  customerReleaseTick: __t.option(__t.u32()),
+  cleanupCompletedTick: __t.option(__t.u32()),
+  trayId: __t.option(__t.u64()),
+  readyTasks: __t.u32(),
+  activeTasks: __t.u32(),
+  deliveryLate: __t.bool(),
+});
+export type UiOrderPayload = __Infer<typeof UiOrderPayload>;
+
+export const UiOrders = __t.object("UiOrders", {});
+export type UiOrders = __Infer<typeof UiOrders>;
+
+export const UiPolicyCatalog = __t.object("UiPolicyCatalog", {});
+export type UiPolicyCatalog = __Infer<typeof UiPolicyCatalog>;
+
+export const UiPolicyPayload = __t.object("UiPolicyPayload", {
+  name: __t.string(),
+  label: __t.string(),
+  description: __t.string(),
+  baseline: __t.bool(),
+  lookahead: __t.bool(),
+  defaultConfigJson: __t.string(),
+});
+export type UiPolicyPayload = __Infer<typeof UiPolicyPayload>;
+
+export const UiResourcePayload = __t.object("UiResourcePayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  label: __t.string(),
+  role: __t.string(),
+  capacity: __t.u32(),
+  reservedUnits: __t.u32(),
+  freeUnits: __t.u32(),
+  available: __t.bool(),
+});
+export type UiResourcePayload = __Infer<typeof UiResourcePayload>;
+
+export const UiResources = __t.object("UiResources", {});
+export type UiResources = __Infer<typeof UiResources>;
+
+export const UiRunPayload = __t.object("UiRunPayload", {
+  id: __t.u64(),
+  name: __t.string(),
+  seed: __t.u32(),
+  tick: __t.u32(),
+  status: __t.string(),
+  mode: __t.string(),
+  version: __t.u64(),
+  policyJson: __t.string(),
+  canControl: __t.bool(),
+  arrivalsClosed: __t.bool(),
+});
+export type UiRunPayload = __Infer<typeof UiRunPayload>;
+
+export const UiRuns = __t.object("UiRuns", {});
+export type UiRuns = __Infer<typeof UiRuns>;
+
+export const UiTaskPayload = __t.object("UiTaskPayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  orderId: __t.u64(),
+  kind: __t.string(),
+  role: __t.string(),
+  status: __t.string(),
+  blockReason: __t.string(),
+  resourceBlocked: __t.bool(),
+  releaseTick: __t.u32(),
+  deadlineTick: __t.option(__t.u32()),
+  durationTicks: __t.u32(),
+  attempt: __t.u32(),
+  workerId: __t.option(__t.u64()),
+  startedTick: __t.option(__t.u32()),
+  finishedTick: __t.option(__t.u32()),
+  finishAtTick: __t.option(__t.u32()),
+  requiredCapabilities: __t.array(__t.string()),
+  steps: __t.array(__t.string()),
+  errorCode: __t.option(__t.string()),
+  estimatedSlackTicks: __t.option(__t.i64()),
+});
+export type UiTaskPayload = __Infer<typeof UiTaskPayload>;
+
+export const UiTasks = __t.object("UiTasks", {});
+export type UiTasks = __Infer<typeof UiTasks>;
+
+export const UiTrayPayload = __t.object("UiTrayPayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  state: __t.string(),
+  orderId: __t.option(__t.u64()),
+});
+export type UiTrayPayload = __Infer<typeof UiTrayPayload>;
+
+export const UiTrays = __t.object("UiTrays", {});
+export type UiTrays = __Infer<typeof UiTrays>;
+
+export const UiWorkerPayload = __t.object("UiWorkerPayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  label: __t.string(),
+  role: __t.string(),
+  enabled: __t.bool(),
+  status: __t.string(),
+  capabilities: __t.array(__t.string()),
+  currentTaskId: __t.option(__t.u64()),
+  currentAttempt: __t.option(__t.u32()),
+  speedFactor: __t.f64(),
+  x: __t.f64(),
+  y: __t.f64(),
+});
+export type UiWorkerPayload = __Infer<typeof UiWorkerPayload>;
+
+export const UiWorkers = __t.object("UiWorkers", {});
+export type UiWorkers = __Infer<typeof UiWorkers>;
 

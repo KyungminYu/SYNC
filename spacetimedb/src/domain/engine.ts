@@ -1,0 +1,792 @@
+import {
+  plan,
+  validatePolicyConfig,
+  DEFAULT_POLICY_CONFIG,
+} from '../policies/scheduler.ts';
+import type {
+  PolicyConfig,
+  Snapshot,
+  Assignment,
+} from '../policies/scheduler.ts';
+import { materializeRecipe, ROLE_CAPACITIES, isRecipeId } from './recipes.ts';
+import type { RecipeId } from './recipes.ts';
+import type {
+  State,
+  Principal,
+  Order,
+  Task,
+  Run,
+  Event,
+  Job,
+} from './model.ts';
+import { nextBase, readPolicy } from './model.ts';
+import { requireControl, requireOwner, requireService } from './access.ts';
+const MAX_ORDERS = 100;
+export function assertInteger(
+  n: number,
+  min: number,
+  max: number,
+  field: string,
+): void {
+  if (!Number.isSafeInteger(n) || n < min || n > max)
+    throw new Error(`INVALID_${field}`);
+}
+export function emit(
+  s: State,
+  type: string,
+  detail: string,
+  refs: Partial<Event> = {},
+): void {
+  s.events.push({
+    ...nextBase(s),
+    sequence: ++s.run.eventSequence,
+    tick: s.run.tick,
+    type,
+    detail,
+    ...refs,
+  });
+}
+export function emptyState(run: Run): State {
+  return {
+    run,
+    members: [],
+    orders: [],
+    tasks: [],
+    dependencies: [],
+    workers: [],
+    resources: [],
+    requirements: [],
+    reservations: [],
+    trays: [],
+    jobs: [],
+    decisions: [],
+    events: [],
+    telemetry: [],
+  };
+}
+export function createState(
+  id: bigint,
+  ownerIdentityHex: string,
+  name: string,
+  seed: number,
+  trayCount: number,
+  mode: 'deterministic' | 'claude',
+  budgetMicrousd?: bigint,
+): State {
+  assertInteger(seed, 0, 4294967295, 'SEED');
+  assertInteger(trayCount, 1, 20, 'TRAYS');
+  if (!name.trim() || name.length > 80) throw new Error('INVALID_NAME');
+  if (budgetMicrousd !== undefined && budgetMicrousd < 0n)
+    throw new Error('INVALID_BUDGET');
+  const s = emptyState({
+    id,
+    ownerIdentityHex,
+    name: name.trim(),
+    seed,
+    tick: 0,
+    status: 'paused',
+    arrivalsClosed: false,
+    mode,
+    version: 0n,
+    nextId: 1n,
+    eventSequence: 0n,
+    policyJson: JSON.stringify(DEFAULT_POLICY_CONFIG),
+    maxOrders: MAX_ORDERS,
+    budgetMicrousd,
+    modeledSpentMicrousd: 0n,
+    reservedMicrousd: 0n,
+  });
+  for (const [role, capacity] of Object.entries(ROLE_CAPACITIES)) {
+    s.resources.push({
+      ...nextBase(s),
+      label: `${role} station`,
+      role,
+      capacity,
+      available: true,
+    });
+    for (let i = 0; i < capacity; i++)
+      s.workers.push({
+        ...nextBase(s),
+        label: `${role} ${i + 1}`,
+        role,
+        capabilities: [role],
+        enabled: true,
+        speedFactor: 1,
+        x: Object.keys(ROLE_CAPACITIES).indexOf(role) * 3,
+        y: i * 2,
+      });
+  }
+  for (let i = 0; i < trayCount; i++)
+    s.trays.push({ ...nextBase(s), state: 'clean' });
+  emit(s, 'run_created', 'Seven concrete workers; station capacities 2/2/2/1.');
+  return s;
+}
+export function setMember(
+  s: State,
+  actor: Principal,
+  identityHex: string,
+  role: 'viewer' | 'operator' | 'service',
+  enabled: boolean,
+): void {
+  requireOwner(s, actor);
+  if (!identityHex || identityHex === s.run.ownerIdentityHex)
+    throw new Error('INVALID_MEMBER');
+  const existing = s.members.find((m) => m.identityHex === identityHex);
+  if (
+    (!enabled || role !== 'service') &&
+    s.jobs.some(
+      (j) =>
+        j.claimantIdentityHex === identityHex &&
+        ['claimed', 'uncertain'].includes(j.status),
+    )
+  )
+    throw new Error('RECONCILE_CLAIMS_BEFORE_REVOKE');
+  if (existing) {
+    existing.permission = role;
+    existing.enabled = enabled;
+  } else
+    s.members.push({ ...nextBase(s), identityHex, permission: role, enabled });
+  s.run.version++;
+}
+export function setPolicy(
+  s: State,
+  actor: Principal,
+  patch: Partial<PolicyConfig>,
+): void {
+  requireControl(s, actor);
+  const config = { ...DEFAULT_POLICY_CONFIG, ...readPolicy(s), ...patch };
+  validatePolicyConfig(config);
+  s.run.policyJson = JSON.stringify(config);
+  s.run.version++;
+  emit(s, 'policy_changed', config.policy);
+}
+export function addOrder(
+  s: State,
+  actor: Principal,
+  args: {
+    externalKey: string;
+    recipe: RecipeId;
+    deadlineInTicks: number;
+    value: number;
+    priority: number;
+    customerUseTicks: number;
+  },
+): Order {
+  requireControl(s, actor);
+  if (!args.externalKey || args.externalKey.length > 100)
+    throw new Error('INVALID_EXTERNAL_KEY');
+  const old = s.orders.find((o) => o.externalKey === args.externalKey);
+  if (old) {
+    if (
+      old.recipe !== args.recipe ||
+      old.deadlineTick - old.arrivalTick !== args.deadlineInTicks ||
+      old.value !== args.value ||
+      old.priority !== args.priority ||
+      old.customerUseTicks !== args.customerUseTicks
+    )
+      throw new Error('IDEMPOTENCY_KEY_CONFLICT');
+    return old;
+  }
+  if (s.orders.length >= s.run.maxOrders || !isRecipeId(args.recipe))
+    throw new Error('INVALID_ORDER_OR_LIMIT');
+  assertInteger(args.deadlineInTicks, 1, 10000, 'DEADLINE');
+  assertInteger(
+    s.run.tick + args.deadlineInTicks,
+    0,
+    4294967295,
+    'ABSOLUTE_DEADLINE',
+  );
+  assertInteger(args.customerUseTicks, 0, 10000, 'CUSTOMER_WAIT');
+  assertInteger(args.value, 1, 10000, 'VALUE');
+  assertInteger(args.priority, 0, 100, 'PRIORITY');
+  if (s.run.status === 'completed')
+    throw new Error('RUN_COMPLETED_CREATE_NEW_RUN');
+  if (s.run.arrivalsClosed) throw new Error('ARRIVALS_CLOSED');
+  const o: Order = {
+    ...nextBase(s),
+    externalKey: args.externalKey,
+    recipe: args.recipe,
+    arrivalTick: s.run.tick,
+    deadlineTick: s.run.tick + args.deadlineInTicks,
+    value: args.value,
+    priority: args.priority,
+    customerUseTicks: args.customerUseTicks,
+    status: 'open',
+  };
+  s.orders.push(o);
+  const defs = materializeRecipe(args.recipe);
+  const ids = new Map<string, bigint>();
+  for (const d of defs) {
+    const task: Task = {
+      ...nextBase(s),
+      orderId: o.id,
+      kind: d.kind,
+      role: d.role,
+      status: 'blocked',
+      releaseTick: s.run.tick,
+      deadlineTick: d.role === 'cleaner' ? undefined : o.deadlineTick,
+      durationTicks: d.durationTicks,
+      priority: o.priority,
+      value: d.rewardDelivery ? o.value : 0,
+      requiredCapabilities: [...d.capabilities],
+      estimatedCostMicrousd: d.estimatedCostMicrousd,
+      attempt: 0,
+      customerReleaseGuard: d.customerReleaseGuard,
+      trayMode: d.trayMode,
+    };
+    s.tasks.push(task);
+    ids.set(d.kind, task.id);
+    const resource = s.resources.find((r) => r.role === d.role)!;
+    s.requirements.push({
+      ...nextBase(s),
+      taskId: task.id,
+      resourceId: resource.id,
+      units: 1,
+    });
+  }
+  for (const d of defs)
+    for (const pred of d.dependencies)
+      s.dependencies.push({
+        ...nextBase(s),
+        orderId: o.id,
+        predecessorId: ids.get(pred)!,
+        successorId: ids.get(d.kind)!,
+      });
+  refreshReady(s);
+  s.run.version++;
+  emit(s, 'order_arrived', args.recipe, { orderId: o.id });
+  return o;
+}
+export function blockedReason(s: State, t: Task): string {
+  if (!['blocked', 'ready'].includes(t.status)) return t.status;
+  if (t.releaseTick > s.run.tick) return 'release_time';
+  if (
+    s.dependencies
+      .filter((d) => d.successorId === t.id)
+      .some(
+        (d) =>
+          s.tasks.find((p) => p.id === d.predecessorId)?.status !== 'succeeded',
+      )
+  )
+    return 'dependencies';
+  const order = s.orders.find((o) => o.id === t.orderId)!;
+  if (
+    t.customerReleaseGuard &&
+    (order.customerReleaseTick === undefined ||
+      s.run.tick < order.customerReleaseTick)
+  )
+    return 'customer_using_tray';
+  return 'eligible';
+}
+export function refreshReady(s: State): void {
+  for (const t of s.tasks)
+    if (t.status === 'blocked' || t.status === 'ready')
+      t.status = blockedReason(s, t) === 'eligible' ? 'ready' : 'blocked';
+}
+export function freeUnits(s: State, resourceId: bigint): number {
+  const r = s.resources.find((x) => x.id === resourceId);
+  if (!r || !r.available) return 0;
+  return (
+    r.capacity -
+    s.reservations
+      .filter((x) => x.resourceId === resourceId)
+      .reduce((sum, x) => sum + x.units, 0)
+  );
+}
+function duration(s: State, t: Task, workerId: bigint): number {
+  const worker = s.workers.find((w) => w.id === workerId)!;
+  return Math.max(1, Math.ceil(t.durationTicks / worker.speedFactor));
+}
+export function downstreamTail(
+  s: State,
+  t: Task,
+  visited = new Set<bigint>(),
+): number {
+  if (visited.has(t.id)) throw new Error('DEPENDENCY_CYCLE');
+  // Delivery is the latency/value terminal. Cleanup has its own chain and no delivery deadline.
+  if (t.kind === 'deliver_order' || t.kind === 'return_tray') return 0;
+  const path = new Set(visited);
+  path.add(t.id);
+  const succ = s.dependencies
+    .filter((d) => d.predecessorId === t.id)
+    .map((d) => s.tasks.find((x) => x.id === d.successorId)!);
+  return Math.max(
+    0,
+    ...succ.map((n) => n.durationTicks + downstreamTail(s, n, path)),
+  );
+}
+export function snapshot(s: State): Snapshot {
+  refreshReady(s);
+  const tasks = s.tasks.filter((t) => t.status === 'ready');
+  return {
+    tick: s.run.tick,
+    budgetRemainingMicrousd:
+      s.run.budgetMicrousd === undefined
+        ? undefined
+        : s.run.budgetMicrousd -
+          s.run.modeledSpentMicrousd -
+          s.run.reservedMicrousd,
+    tasks: tasks.map((t) => ({
+      id: t.id,
+      orderId: t.orderId,
+      releaseTick: t.releaseTick,
+      deadlineTick: t.deadlineTick,
+      priority: t.priority,
+      value: t.value,
+      remainingPathTicks: downstreamTail(s, t),
+      requiredCapabilities: t.requiredCapabilities,
+      requirements: s.requirements
+        .filter((r) => r.taskId === t.id)
+        .map((r) => ({ resourceId: r.resourceId, units: r.units })),
+      trayMode:
+        t.trayMode === 'acquire' &&
+        s.orders.find((o) => o.id === t.orderId)?.trayId !== undefined
+          ? 'none'
+          : t.trayMode,
+    })),
+    workers: s.workers
+      .filter((w) => w.enabled && w.currentTaskId === undefined)
+      .map((w) => ({
+        id: w.id,
+        capabilities: w.capabilities,
+        estimates: tasks.map((t) => ({
+          taskId: t.id,
+          durationTicks: duration(s, t, w.id),
+          costMicrousd: t.estimatedCostMicrousd,
+        })),
+      })),
+    resources: s.resources.map((r) => ({
+      id: r.id,
+      freeUnits: freeUnits(s, r.id),
+    })),
+    freeTrayIds: s.trays
+      .filter((t) => t.state === 'clean' && t.orderId === undefined)
+      .map((t) => t.id),
+  };
+}
+function admit(s: State, a: Assignment, policy: string): void {
+  const t = s.tasks.find((t) => t.id === a.taskId);
+  const w = s.workers.find((w) => w.id === a.workerId);
+  if (
+    !t ||
+    !w ||
+    t.status !== 'ready' ||
+    !w.enabled ||
+    w.currentTaskId !== undefined ||
+    !t.requiredCapabilities.every((k) => w.capabilities.includes(k))
+  )
+    throw new Error('INVALID_ASSIGNMENT');
+  if (blockedReason(s, t) !== 'eligible') throw new Error('NOT_ELIGIBLE');
+  const reqs = s.requirements.filter((r) => r.taskId === t.id);
+  if (reqs.some((r) => freeUnits(s, r.resourceId) < r.units))
+    throw new Error('RESOURCE_CONFLICT');
+  if (
+    s.run.budgetMicrousd !== undefined &&
+    s.run.modeledSpentMicrousd +
+      s.run.reservedMicrousd +
+      t.estimatedCostMicrousd >
+      s.run.budgetMicrousd
+  )
+    return;
+  const order = s.orders.find((o) => o.id === t.orderId)!;
+  if (t.trayMode === 'acquire' && order.trayId === undefined) {
+    const tray = s.trays.find(
+      (x) =>
+        x.id === a.trayId && x.state === 'clean' && x.orderId === undefined,
+    );
+    if (!tray) throw new Error('TRAY_CONFLICT');
+    tray.orderId = order.id;
+    tray.state = 'in_use';
+    order.trayId = tray.id;
+  }
+  if (
+    (t.trayMode === 'release' ||
+      t.role === 'cleaner' ||
+      t.kind === 'deliver_order') &&
+    order.trayId === undefined
+  )
+    throw new Error('ORDER_HAS_NO_TRAY');
+  t.attempt++;
+  t.workerId = w.id;
+  t.status = 'assigned';
+  t.finishedTick = undefined;
+  t.errorCode = undefined;
+  w.currentTaskId = t.id;
+  w.currentAttempt = t.attempt;
+  for (const r of reqs)
+    s.reservations.push({
+      ...nextBase(s),
+      taskId: t.id,
+      workerId: w.id,
+      attempt: t.attempt,
+      resourceId: r.resourceId,
+      units: r.units,
+    });
+  s.run.reservedMicrousd += t.estimatedCostMicrousd;
+  const job: Job = {
+    ...nextBase(s),
+    taskId: t.id,
+    workerId: w.id,
+    attempt: t.attempt,
+    status: 'pending',
+    expectedAction: t.kind,
+    reservedCostMicrousd: t.estimatedCostMicrousd,
+    observationJson: JSON.stringify({
+      runId: s.run.id.toString(),
+      taskId: t.id.toString(),
+      orderId: order.id.toString(),
+      attempt: t.attempt,
+      recipe: order.recipe,
+      action: t.kind,
+      tick: s.run.tick,
+    }),
+  };
+  s.jobs.push(job);
+  s.decisions.push({
+    ...nextBase(s),
+    sequence: ++s.run.eventSequence,
+    tick: s.run.tick,
+    policy,
+    taskId: t.id,
+    workerId: w.id,
+    attempt: t.attempt,
+    score: a.score,
+    reasonCodes: a.reasonCodes,
+    snapshotVersion: s.run.version,
+  });
+  emit(s, 'task_assigned', policy, {
+    taskId: t.id,
+    workerId: w.id,
+    attempt: t.attempt,
+  });
+  if (s.run.mode === 'deterministic') startJob(s, job);
+}
+export function schedule(s: State): void {
+  if (s.run.status !== 'running') return;
+  const config = readPolicy(s);
+  const proposal = plan(snapshot(s), config);
+  for (const a of proposal) admit(s, a, config.policy ?? 'sync_greedy');
+  s.run.version++;
+  assertInvariants(s);
+}
+function startJob(s: State, j: Job): void {
+  const t = s.tasks.find((t) => t.id === j.taskId)!;
+  if (t.attempt !== j.attempt || t.status !== 'assigned')
+    throw new Error('STALE_ATTEMPT');
+  j.status = 'accepted';
+  j.submittedTick = s.run.tick;
+  t.status = 'running';
+  t.startedTick = s.run.tick;
+  t.finishAtTick = s.run.tick + duration(s, t, j.workerId);
+  if (t.kind === 'clean_tray') {
+    const o = s.orders.find((o) => o.id === t.orderId)!;
+    s.trays.find((tr) => tr.id === o.trayId)!.state = 'cleaning';
+  }
+  emit(s, 'task_started', t.kind, {
+    taskId: t.id,
+    workerId: j.workerId,
+    attempt: t.attempt,
+  });
+}
+export function claimJob(s: State, actor: Principal, jobId: bigint): void {
+  requireService(s, actor);
+  if (s.run.mode !== 'claude' || s.run.status !== 'running')
+    throw new Error('NOT_LIVE_RUN');
+  const j = s.jobs.find((j) => j.id === jobId);
+  if (!j) throw new Error('JOB_NOT_FOUND');
+  if (j.status === 'claimed' && j.claimantIdentityHex === actor.identityHex)
+    return;
+  if (j.status !== 'pending') throw new Error('ALREADY_CLAIMED');
+  j.status = 'claimed';
+  j.claimantIdentityHex = actor.identityHex;
+  j.claimedTick = s.run.tick;
+  s.run.version++;
+}
+export function submitAction(
+  s: State,
+  actor: Principal,
+  jobId: bigint,
+  attempt: number,
+  action: string,
+): void {
+  requireService(s, actor);
+  const j = s.jobs.find((j) => j.id === jobId);
+  if (
+    !j ||
+    j.claimantIdentityHex !== actor.identityHex ||
+    j.attempt !== attempt
+  )
+    throw new Error('INVALID_JOB_OWNER_OR_ATTEMPT');
+  const t = s.tasks.find((t) => t.id === j.taskId)!;
+  if (t.attempt !== attempt) throw new Error('STALE_ATTEMPT');
+  if (j.expectedAction !== action) throw new Error('INVALID_ACTION');
+  if (j.status === 'accepted') return;
+  if (s.run.status !== 'running' || j.status !== 'claimed')
+    throw new Error('JOB_NOT_CLAIMED_OR_RUN_PAUSED');
+  startJob(s, j);
+  s.run.version++;
+  assertInvariants(s);
+}
+export function finishTask(s: State, taskId: bigint, attempt: number): void {
+  const t = s.tasks.find((t) => t.id === taskId);
+  if (!t || t.attempt !== attempt) throw new Error('STALE_ATTEMPT');
+  if (t.status === 'succeeded') return;
+  if (
+    t.status !== 'running' ||
+    t.finishAtTick === undefined ||
+    t.finishAtTick > s.run.tick
+  )
+    throw new Error('NOT_FINISHED');
+  const w = s.workers.find((w) => w.id === t.workerId);
+  if (!w || w.currentTaskId !== t.id || w.currentAttempt !== attempt)
+    throw new Error('STALE_WORKER');
+  t.status = 'succeeded';
+  t.finishedTick = s.run.tick;
+  w.currentTaskId = undefined;
+  w.currentAttempt = undefined;
+  s.reservations = s.reservations.filter(
+    (r) => !(r.taskId === t.id && r.attempt === attempt),
+  );
+  const job = s.jobs.find((j) => j.taskId === t.id && j.attempt === attempt)!;
+  s.run.reservedMicrousd -= job.reservedCostMicrousd;
+  s.run.modeledSpentMicrousd += job.reservedCostMicrousd;
+  const o = s.orders.find((o) => o.id === t.orderId)!;
+  if (t.kind === 'deliver_order') {
+    o.status = 'delivered';
+    o.deliveredTick = s.run.tick;
+    o.customerReleaseTick = s.run.tick + o.customerUseTicks;
+  }
+  if (t.kind === 'collect_tray')
+    s.trays.find((tr) => tr.id === o.trayId)!.state = 'dirty';
+  if (t.trayMode === 'release') {
+    const tray = s.trays.find((tr) => tr.id === o.trayId);
+    if (!tray || tray.orderId !== o.id) throw new Error('TRAY_OWNER_MISMATCH');
+    tray.state = 'clean';
+    tray.orderId = undefined;
+    o.trayId = undefined;
+    o.status = 'cleaned';
+    o.cleanupCompletedTick = s.run.tick;
+  }
+  emit(s, 'task_succeeded', t.kind, {
+    taskId: t.id,
+    orderId: o.id,
+    workerId: w.id,
+    attempt,
+  });
+  refreshReady(s);
+}
+export function advance(s: State): void {
+  if (s.run.status !== 'running') return;
+  assertInteger(s.run.tick + 1, 0, 4294967295, 'TICK');
+  s.run.tick++;
+  for (const t of s.tasks
+    .filter(
+      (t) =>
+        t.status === 'running' &&
+        t.finishAtTick !== undefined &&
+        t.finishAtTick <= s.run.tick,
+    )
+    .sort((a, b) => (a.id < b.id ? -1 : 1)))
+    finishTask(s, t.id, t.attempt);
+  refreshReady(s);
+  schedule(s);
+  if (s.run.arrivalsClosed && s.orders.every((o) => o.status === 'cleaned')) {
+    s.run.status = 'completed';
+    emit(s, 'run_completed', 'All orders delivered and cleaned.');
+  }
+  assertInvariants(s);
+}
+export function setRunning(s: State, actor: Principal, running: boolean): void {
+  requireControl(s, actor);
+  if (s.run.status === 'completed') throw new Error('RUN_COMPLETED');
+  s.run.status = running ? 'running' : 'paused';
+  s.run.version++;
+  emit(s, running ? 'run_started' : 'run_paused', '');
+  if (running) schedule(s);
+}
+export function setAvailability(
+  s: State,
+  actor: Principal,
+  resourceId: bigint,
+  available: boolean,
+): void {
+  requireControl(s, actor);
+  const r = s.resources.find((r) => r.id === resourceId);
+  if (!r) throw new Error('RESOURCE_NOT_FOUND');
+  // A disruption blocks new admissions; admitted non-preemptive operations drain normally.
+  r.available = available;
+  s.run.version++;
+  emit(s, 'resource_availability_changed', `${r.label}:${available}`);
+  schedule(s);
+}
+export function markUncertain(s: State, actor: Principal, jobId: bigint): void {
+  requireControl(s, actor);
+  const j = s.jobs.find((j) => j.id === jobId);
+  if (!j || j.status !== 'claimed') throw new Error('JOB_NOT_CLAIMED');
+  j.status = 'uncertain';
+  s.tasks.find((t) => t.id === j.taskId)!.status = 'uncertain';
+  s.run.version++;
+  emit(s, 'job_uncertain', 'Reservations retained; reconcile before retry.', {
+    taskId: j.taskId,
+    attempt: j.attempt,
+  });
+}
+export function reconcile(
+  s: State,
+  actor: Principal,
+  jobId: bigint,
+  resolution: 'resume' | 'retry_safe',
+): void {
+  requireOwner(s, actor);
+  const j = s.jobs.find((j) => j.id === jobId);
+  if (!j || j.status !== 'uncertain') throw new Error('JOB_NOT_UNCERTAIN');
+  const t = s.tasks.find((t) => t.id === j.taskId)!;
+  if (t.attempt !== j.attempt) throw new Error('STALE_ATTEMPT');
+  if (resolution === 'resume') {
+    if (s.run.status !== 'running') throw new Error('RUN_PAUSED');
+    t.status = 'assigned';
+    startJob(s, j);
+  } else {
+    // Operator attests that the external action did not occur. Retain order tray.
+    j.status = 'failed';
+    s.reservations = s.reservations.filter(
+      (r) => !(r.taskId === t.id && r.attempt === j.attempt),
+    );
+    const w = s.workers.find((w) => w.id === j.workerId)!;
+    w.currentTaskId = undefined;
+    w.currentAttempt = undefined;
+    s.run.reservedMicrousd -= j.reservedCostMicrousd;
+    t.status = 'blocked';
+    t.workerId = undefined;
+    refreshReady(s);
+    schedule(s);
+  }
+  s.run.version++;
+  emit(s, 'job_reconciled', resolution, { taskId: t.id, attempt: j.attempt });
+  assertInvariants(s);
+}
+export function assertInvariants(s: State): void {
+  const tasks = new Map(s.tasks.map((t) => [t.id, t]));
+  const orders = new Map(s.orders.map((o) => [o.id, o]));
+  for (const group of [
+    s.members,
+    s.orders,
+    s.tasks,
+    s.dependencies,
+    s.workers,
+    s.resources,
+    s.requirements,
+    s.reservations,
+    s.trays,
+    s.jobs,
+    s.decisions,
+    s.events,
+    s.telemetry,
+  ])
+    for (const row of group)
+      if (row.runId !== s.run.id || row.key !== `${row.runId}:${row.id}`)
+        throw new Error('CROSS_RUN_ROW');
+  for (const d of s.dependencies) {
+    if (
+      !tasks.has(d.predecessorId) ||
+      !tasks.has(d.successorId) ||
+      tasks.get(d.predecessorId)!.orderId !== d.orderId ||
+      tasks.get(d.successorId)!.orderId !== d.orderId
+    )
+      throw new Error('INVALID_EDGE');
+  }
+  const active = s.tasks.filter((t) =>
+    ['assigned', 'running', 'uncertain'].includes(t.status),
+  );
+  for (const w of s.workers) {
+    const owned = active.filter((t) => t.workerId === w.id);
+    if (
+      owned.length > 1 ||
+      (w.currentTaskId === undefined) !== (owned.length === 0) ||
+      owned.some(
+        (t) => t.id !== w.currentTaskId || t.attempt !== w.currentAttempt,
+      )
+    )
+      throw new Error('WORKER_CAPACITY');
+  }
+  for (const t of active) {
+    if (
+      !orders.has(t.orderId) ||
+      !s.workers.some((w) => w.id === t.workerId) ||
+      s.dependencies
+        .filter((d) => d.successorId === t.id)
+        .some((d) => tasks.get(d.predecessorId)?.status !== 'succeeded')
+    )
+      throw new Error('ACTIVE_DEPENDENCY');
+  }
+  for (const r of s.resources) {
+    const used = s.reservations
+      .filter((x) => x.resourceId === r.id)
+      .reduce((n, x) => n + x.units, 0);
+    if (used < 0 || used > r.capacity) throw new Error('RESOURCE_CAPACITY');
+  }
+  for (const r of s.reservations) {
+    const t = tasks.get(r.taskId);
+    if (
+      !t ||
+      !active.includes(t) ||
+      t.attempt !== r.attempt ||
+      t.workerId !== r.workerId ||
+      !s.resources.some((x) => x.id === r.resourceId)
+    )
+      throw new Error('STALE_RESERVATION');
+  }
+  for (const t of active)
+    for (const req of s.requirements.filter((r) => r.taskId === t.id)) {
+      const sum = s.reservations
+        .filter(
+          (r) =>
+            r.taskId === t.id &&
+            r.attempt === t.attempt &&
+            r.resourceId === req.resourceId,
+        )
+        .reduce((n, r) => n + r.units, 0);
+      if (sum !== req.units) throw new Error('MISSING_RESERVATION');
+    }
+  for (const tray of s.trays) {
+    if (tray.state === 'clean' && tray.orderId !== undefined)
+      throw new Error('DIRTY_CLEAN_TRAY');
+    if (
+      tray.state !== 'clean' &&
+      (tray.orderId === undefined ||
+        orders.get(tray.orderId)?.trayId !== tray.id)
+    )
+      throw new Error('TRAY_OWNERSHIP');
+  }
+  for (const o of s.orders)
+    if (
+      o.trayId !== undefined &&
+      !s.trays.some((tr) => tr.id === o.trayId && tr.orderId === o.id)
+    )
+      throw new Error('ORDER_TRAY_MISMATCH');
+  if (
+    s.run.budgetMicrousd !== undefined &&
+    s.run.modeledSpentMicrousd + s.run.reservedMicrousd > s.run.budgetMicrousd
+  )
+    throw new Error('BUDGET_CAP');
+  const outstanding = s.jobs
+    .filter((j) =>
+      active.some((t) => t.id === j.taskId && t.attempt === j.attempt),
+    )
+    .reduce((n, j) => n + j.reservedCostMicrousd, 0n);
+  if (s.run.reservedMicrousd !== outstanding || s.run.reservedMicrousd < 0n)
+    throw new Error('BUDGET_LEDGER');
+}
+export function closeArrivals(s: State, actor: Principal): void {
+  requireControl(s, actor);
+  s.run.arrivalsClosed = true;
+  s.run.version++;
+  emit(s, 'arrivals_closed', 'No more orders will be admitted.');
+  if (
+    s.run.status === 'running' &&
+    s.orders.every((o) => o.status === 'cleaned')
+  ) {
+    s.run.status = 'completed';
+    emit(s, 'run_completed', 'All admitted orders delivered and cleaned.');
+  }
+}

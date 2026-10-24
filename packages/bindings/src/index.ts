@@ -35,197 +35,139 @@ import {
 
 // Import all reducer arg schemas
 import ClaimAgentJobReducer from "./claim_agent_job_reducer";
-import CreateDemoRunReducer from "./create_demo_run_reducer";
+import CloseArrivalsReducer from "./close_arrivals_reducer";
+import CreateRunReducer from "./create_run_reducer";
+import EnqueueOrderReducer from "./enqueue_order_reducer";
+import GrantMemberReducer from "./grant_member_reducer";
 import MarkJobUncertainReducer from "./mark_job_uncertain_reducer";
-import PauseRunReducer from "./pause_run_reducer";
-import RegisterServiceReducer from "./register_service_reducer";
-import ResetRunReducer from "./reset_run_reducer";
-import ScheduleReadyTasksReducer from "./schedule_ready_tasks_reducer";
-import StartRunReducer from "./start_run_reducer";
+import ReconcileJobReducer from "./reconcile_job_reducer";
+import ReportUsageReducer from "./report_usage_reducer";
+import SetPolicyReducer from "./set_policy_reducer";
+import SetResourceAvailableReducer from "./set_resource_available_reducer";
+import SetRunStatusReducer from "./set_run_status_reducer";
+import StepRunReducer from "./step_run_reducer";
 import SubmitAgentActionReducer from "./submit_agent_action_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
-import AgentJobRow from "./agent_job_table";
-import DecisionRow from "./decision_table";
-import DependencyRow from "./dependency_table";
-import ExecutionEventRow from "./execution_event_table";
-import ReservationRow from "./reservation_table";
-import ResourceRow from "./resource_table";
-import RunRow from "./run_table";
-import TaskRow from "./task_table";
-import TaskRequirementRow from "./task_requirement_table";
-import WorkerRow from "./worker_table";
+import ServiceJobsRow from "./service_jobs_table";
+import UiDagEdgesRow from "./ui_dag_edges_table";
+import UiDecisionsRow from "./ui_decisions_table";
+import UiEventsRow from "./ui_events_table";
+import UiMetricsRow from "./ui_metrics_table";
+import UiOrdersRow from "./ui_orders_table";
+import UiPolicyCatalogRow from "./ui_policy_catalog_table";
+import UiResourcesRow from "./ui_resources_table";
+import UiRunsRow from "./ui_runs_table";
+import UiTasksRow from "./ui_tasks_table";
+import UiTraysRow from "./ui_trays_table";
+import UiWorkersRow from "./ui_workers_table";
 
 /** Type-only namespace exports for generated type groups. */
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
-  agentJob: __table({
-    name: 'agent_job',
+  serviceJobs: __table({
+    name: 'service_jobs',
     indexes: [
-      { accessor: 'id', name: 'agent_job_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-      { accessor: 'runId', name: 'agent_job_run_id_idx_btree', algorithm: 'btree', columns: [
-        'runId',
-      ] },
-      { accessor: 'taskId', name: 'agent_job_task_id_idx_btree', algorithm: 'btree', columns: [
-        'taskId',
-      ] },
     ],
     constraints: [
-      { name: 'agent_job_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, AgentJobRow),
-  decision: __table({
-    name: 'decision',
+  }, ServiceJobsRow),
+  uiDagEdges: __table({
+    name: 'ui_dag_edges',
     indexes: [
-      { accessor: 'id', name: 'decision_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-      { accessor: 'runId', name: 'decision_run_id_idx_btree', algorithm: 'btree', columns: [
-        'runId',
-      ] },
     ],
     constraints: [
-      { name: 'decision_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, DecisionRow),
-  dependency: __table({
-    name: 'dependency',
+  }, UiDagEdgesRow),
+  uiDecisions: __table({
+    name: 'ui_decisions',
     indexes: [
-      { accessor: 'id', name: 'dependency_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-      { accessor: 'runId', name: 'dependency_run_id_idx_btree', algorithm: 'btree', columns: [
-        'runId',
-      ] },
-      { accessor: 'taskId', name: 'dependency_task_id_idx_btree', algorithm: 'btree', columns: [
-        'taskId',
-      ] },
     ],
     constraints: [
-      { name: 'dependency_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, DependencyRow),
-  executionEvent: __table({
-    name: 'execution_event',
+  }, UiDecisionsRow),
+  uiEvents: __table({
+    name: 'ui_events',
     indexes: [
-      { accessor: 'id', name: 'execution_event_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-      { accessor: 'runId', name: 'execution_event_run_id_idx_btree', algorithm: 'btree', columns: [
-        'runId',
-      ] },
     ],
     constraints: [
-      { name: 'execution_event_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, ExecutionEventRow),
-  reservation: __table({
-    name: 'reservation',
+  }, UiEventsRow),
+  uiMetrics: __table({
+    name: 'ui_metrics',
     indexes: [
-      { accessor: 'id', name: 'reservation_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-      { accessor: 'resourceId', name: 'reservation_resource_id_idx_btree', algorithm: 'btree', columns: [
-        'resourceId',
-      ] },
-      { accessor: 'runId', name: 'reservation_run_id_idx_btree', algorithm: 'btree', columns: [
-        'runId',
-      ] },
-      { accessor: 'taskId', name: 'reservation_task_id_idx_btree', algorithm: 'btree', columns: [
-        'taskId',
-      ] },
     ],
     constraints: [
-      { name: 'reservation_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, ReservationRow),
-  resource: __table({
-    name: 'resource',
+  }, UiMetricsRow),
+  uiOrders: __table({
+    name: 'ui_orders',
     indexes: [
-      { accessor: 'id', name: 'resource_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-      { accessor: 'runId', name: 'resource_run_id_idx_btree', algorithm: 'btree', columns: [
-        'runId',
-      ] },
     ],
     constraints: [
-      { name: 'resource_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, ResourceRow),
-  run: __table({
-    name: 'run',
+  }, UiOrdersRow),
+  uiPolicyCatalog: __table({
+    name: 'ui_policy_catalog',
     indexes: [
-      { accessor: 'id', name: 'run_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
     ],
     constraints: [
-      { name: 'run_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, RunRow),
-  task: __table({
-    name: 'task',
+  }, UiPolicyCatalogRow),
+  uiResources: __table({
+    name: 'ui_resources',
     indexes: [
-      { accessor: 'id', name: 'task_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-      { accessor: 'runId', name: 'task_run_id_idx_btree', algorithm: 'btree', columns: [
-        'runId',
-      ] },
     ],
     constraints: [
-      { name: 'task_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, TaskRow),
-  taskRequirement: __table({
-    name: 'task_requirement',
+  }, UiResourcesRow),
+  uiRuns: __table({
+    name: 'ui_runs',
     indexes: [
-      { accessor: 'id', name: 'task_requirement_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-      { accessor: 'runId', name: 'task_requirement_run_id_idx_btree', algorithm: 'btree', columns: [
-        'runId',
-      ] },
-      { accessor: 'taskId', name: 'task_requirement_task_id_idx_btree', algorithm: 'btree', columns: [
-        'taskId',
-      ] },
     ],
     constraints: [
-      { name: 'task_requirement_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, TaskRequirementRow),
-  worker: __table({
-    name: 'worker',
+  }, UiRunsRow),
+  uiTasks: __table({
+    name: 'ui_tasks',
     indexes: [
-      { accessor: 'id', name: 'worker_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-      { accessor: 'runId', name: 'worker_run_id_idx_btree', algorithm: 'btree', columns: [
-        'runId',
-      ] },
     ],
     constraints: [
-      { name: 'worker_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, WorkerRow),
+  }, UiTasksRow),
+  uiTrays: __table({
+    name: 'ui_trays',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, UiTraysRow),
+  uiWorkers: __table({
+    name: 'ui_workers',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, UiWorkersRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("claim_agent_job", ClaimAgentJobReducer),
-  __reducerSchema("create_demo_run", CreateDemoRunReducer),
+  __reducerSchema("close_arrivals", CloseArrivalsReducer),
+  __reducerSchema("create_run", CreateRunReducer),
+  __reducerSchema("enqueue_order", EnqueueOrderReducer),
+  __reducerSchema("grant_member", GrantMemberReducer),
   __reducerSchema("mark_job_uncertain", MarkJobUncertainReducer),
-  __reducerSchema("pause_run", PauseRunReducer),
-  __reducerSchema("register_service", RegisterServiceReducer),
-  __reducerSchema("reset_run", ResetRunReducer),
-  __reducerSchema("schedule_ready_tasks", ScheduleReadyTasksReducer),
-  __reducerSchema("start_run", StartRunReducer),
+  __reducerSchema("reconcile_job", ReconcileJobReducer),
+  __reducerSchema("report_usage", ReportUsageReducer),
+  __reducerSchema("set_policy", SetPolicyReducer),
+  __reducerSchema("set_resource_available", SetResourceAvailableReducer),
+  __reducerSchema("set_run_status", SetRunStatusReducer),
+  __reducerSchema("step_run", StepRunReducer),
   __reducerSchema("submit_agent_action", SubmitAgentActionReducer),
 );
 
@@ -233,22 +175,139 @@ const reducersSchema = __reducers(
 const proceduresSchema = __procedures(
 );
 
+type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "tables"> & {
+  tables: typeof tablesSchema.schemaType.tables & {
+    /** @deprecated Use `serviceJobs` instead. This alias will be removed in the next major version. */
+    readonly "service_jobs": Omit<typeof tablesSchema.schemaType.tables["serviceJobs"], "accessorName"> & { readonly accessorName: "service_jobs" };
+    /** @deprecated Use `uiDagEdges` instead. This alias will be removed in the next major version. */
+    readonly "ui_dag_edges": Omit<typeof tablesSchema.schemaType.tables["uiDagEdges"], "accessorName"> & { readonly accessorName: "ui_dag_edges" };
+    /** @deprecated Use `uiDecisions` instead. This alias will be removed in the next major version. */
+    readonly "ui_decisions": Omit<typeof tablesSchema.schemaType.tables["uiDecisions"], "accessorName"> & { readonly accessorName: "ui_decisions" };
+    /** @deprecated Use `uiEvents` instead. This alias will be removed in the next major version. */
+    readonly "ui_events": Omit<typeof tablesSchema.schemaType.tables["uiEvents"], "accessorName"> & { readonly accessorName: "ui_events" };
+    /** @deprecated Use `uiMetrics` instead. This alias will be removed in the next major version. */
+    readonly "ui_metrics": Omit<typeof tablesSchema.schemaType.tables["uiMetrics"], "accessorName"> & { readonly accessorName: "ui_metrics" };
+    /** @deprecated Use `uiOrders` instead. This alias will be removed in the next major version. */
+    readonly "ui_orders": Omit<typeof tablesSchema.schemaType.tables["uiOrders"], "accessorName"> & { readonly accessorName: "ui_orders" };
+    /** @deprecated Use `uiPolicyCatalog` instead. This alias will be removed in the next major version. */
+    readonly "ui_policy_catalog": Omit<typeof tablesSchema.schemaType.tables["uiPolicyCatalog"], "accessorName"> & { readonly accessorName: "ui_policy_catalog" };
+    /** @deprecated Use `uiResources` instead. This alias will be removed in the next major version. */
+    readonly "ui_resources": Omit<typeof tablesSchema.schemaType.tables["uiResources"], "accessorName"> & { readonly accessorName: "ui_resources" };
+    /** @deprecated Use `uiRuns` instead. This alias will be removed in the next major version. */
+    readonly "ui_runs": Omit<typeof tablesSchema.schemaType.tables["uiRuns"], "accessorName"> & { readonly accessorName: "ui_runs" };
+    /** @deprecated Use `uiTasks` instead. This alias will be removed in the next major version. */
+    readonly "ui_tasks": Omit<typeof tablesSchema.schemaType.tables["uiTasks"], "accessorName"> & { readonly accessorName: "ui_tasks" };
+    /** @deprecated Use `uiTrays` instead. This alias will be removed in the next major version. */
+    readonly "ui_trays": Omit<typeof tablesSchema.schemaType.tables["uiTrays"], "accessorName"> & { readonly accessorName: "ui_trays" };
+    /** @deprecated Use `uiWorkers` instead. This alias will be removed in the next major version. */
+    readonly "ui_workers": Omit<typeof tablesSchema.schemaType.tables["uiWorkers"], "accessorName"> & { readonly accessorName: "ui_workers" };
+  };
+};
+
 /** The remote SpacetimeDB module schema, both runtime and type information. */
 const REMOTE_MODULE = {
   versionInfo: {
     cliVersion: "2.13.0" as const,
   },
-  tables: tablesSchema.schemaType.tables,
+  tables: tablesSchema.schemaType.tables as __SchemaWithTableAccessorAliases["tables"],
   reducers: reducersSchema.reducersType.reducers,
   ...proceduresSchema,
 } satisfies __RemoteModule<
-  typeof tablesSchema.schemaType,
+  __SchemaWithTableAccessorAliases,
   typeof reducersSchema.reducersType,
   typeof proceduresSchema
 >;
 
+const tableAccessorAliases = {
+  "service_jobs": "serviceJobs",
+  "ui_dag_edges": "uiDagEdges",
+  "ui_decisions": "uiDecisions",
+  "ui_events": "uiEvents",
+  "ui_metrics": "uiMetrics",
+  "ui_orders": "uiOrders",
+  "ui_policy_catalog": "uiPolicyCatalog",
+  "ui_resources": "uiResources",
+  "ui_runs": "uiRuns",
+  "ui_tasks": "uiTasks",
+  "ui_trays": "uiTrays",
+  "ui_workers": "uiWorkers",
+} as const;
+
+function __withTableAccessorAliases<T extends object>(target: T, freeze = false): T {
+  const out = Object.create(Object.getPrototypeOf(target)) as T & Record<string, unknown>;
+  Object.defineProperties(out, Object.getOwnPropertyDescriptors(target));
+  for (const [deprecatedAccessor, targetAccessor] of Object.entries(tableAccessorAliases)) {
+    if (deprecatedAccessor in out) {
+      continue;
+    }
+    Object.defineProperty(out, deprecatedAccessor, {
+      enumerable: true,
+      configurable: false,
+      get: () => out[targetAccessor],
+    });
+  }
+  return freeze ? Object.freeze(out) : out;
+}
+
+type __DbViewBase = __DbConnectionImpl<typeof REMOTE_MODULE>["db"];
+export type DbView = __DbViewBase & {
+  /** @deprecated Use `serviceJobs` instead. This alias will be removed in the next major version. */
+  readonly "service_jobs": __DbViewBase["serviceJobs"];
+  /** @deprecated Use `uiDagEdges` instead. This alias will be removed in the next major version. */
+  readonly "ui_dag_edges": __DbViewBase["uiDagEdges"];
+  /** @deprecated Use `uiDecisions` instead. This alias will be removed in the next major version. */
+  readonly "ui_decisions": __DbViewBase["uiDecisions"];
+  /** @deprecated Use `uiEvents` instead. This alias will be removed in the next major version. */
+  readonly "ui_events": __DbViewBase["uiEvents"];
+  /** @deprecated Use `uiMetrics` instead. This alias will be removed in the next major version. */
+  readonly "ui_metrics": __DbViewBase["uiMetrics"];
+  /** @deprecated Use `uiOrders` instead. This alias will be removed in the next major version. */
+  readonly "ui_orders": __DbViewBase["uiOrders"];
+  /** @deprecated Use `uiPolicyCatalog` instead. This alias will be removed in the next major version. */
+  readonly "ui_policy_catalog": __DbViewBase["uiPolicyCatalog"];
+  /** @deprecated Use `uiResources` instead. This alias will be removed in the next major version. */
+  readonly "ui_resources": __DbViewBase["uiResources"];
+  /** @deprecated Use `uiRuns` instead. This alias will be removed in the next major version. */
+  readonly "ui_runs": __DbViewBase["uiRuns"];
+  /** @deprecated Use `uiTasks` instead. This alias will be removed in the next major version. */
+  readonly "ui_tasks": __DbViewBase["uiTasks"];
+  /** @deprecated Use `uiTrays` instead. This alias will be removed in the next major version. */
+  readonly "ui_trays": __DbViewBase["uiTrays"];
+  /** @deprecated Use `uiWorkers` instead. This alias will be removed in the next major version. */
+  readonly "ui_workers": __DbViewBase["uiWorkers"];
+};
+
+type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
+export type Tables = __TablesBase & {
+  /** @deprecated Use `serviceJobs` instead. This alias will be removed in the next major version. */
+  readonly "service_jobs": __TablesBase["serviceJobs"];
+  /** @deprecated Use `uiDagEdges` instead. This alias will be removed in the next major version. */
+  readonly "ui_dag_edges": __TablesBase["uiDagEdges"];
+  /** @deprecated Use `uiDecisions` instead. This alias will be removed in the next major version. */
+  readonly "ui_decisions": __TablesBase["uiDecisions"];
+  /** @deprecated Use `uiEvents` instead. This alias will be removed in the next major version. */
+  readonly "ui_events": __TablesBase["uiEvents"];
+  /** @deprecated Use `uiMetrics` instead. This alias will be removed in the next major version. */
+  readonly "ui_metrics": __TablesBase["uiMetrics"];
+  /** @deprecated Use `uiOrders` instead. This alias will be removed in the next major version. */
+  readonly "ui_orders": __TablesBase["uiOrders"];
+  /** @deprecated Use `uiPolicyCatalog` instead. This alias will be removed in the next major version. */
+  readonly "ui_policy_catalog": __TablesBase["uiPolicyCatalog"];
+  /** @deprecated Use `uiResources` instead. This alias will be removed in the next major version. */
+  readonly "ui_resources": __TablesBase["uiResources"];
+  /** @deprecated Use `uiRuns` instead. This alias will be removed in the next major version. */
+  readonly "ui_runs": __TablesBase["uiRuns"];
+  /** @deprecated Use `uiTasks` instead. This alias will be removed in the next major version. */
+  readonly "ui_tasks": __TablesBase["uiTasks"];
+  /** @deprecated Use `uiTrays` instead. This alias will be removed in the next major version. */
+  readonly "ui_trays": __TablesBase["uiTrays"];
+  /** @deprecated Use `uiWorkers` instead. This alias will be removed in the next major version. */
+  readonly "ui_workers": __TablesBase["uiWorkers"];
+};
+
 /** The tables available in this remote SpacetimeDB module. Each table reference doubles as a query builder. */
-export const tables: __QueryBuilder<typeof tablesSchema.schemaType> = __makeQueryBuilder(tablesSchema.schemaType);
+const tablesBase: __TablesBase = __makeQueryBuilder(tablesSchema.schemaType);
+export const tables: Tables = __withTableAccessorAliases(tablesBase, true) as Tables;
 
 /** The reducers available in this remote SpacetimeDB module. */
 export const reducers = __convertToAccessorMap(reducersSchema.reducersType.reducers);
@@ -257,13 +316,13 @@ export const reducers = __convertToAccessorMap(reducersSchema.reducersType.reduc
 export const procedures = __convertToAccessorMap(proceduresSchema.procedures);
 
 /** The context type returned in callbacks for all possible events. */
-export type EventContext = __EventContextInterface<typeof REMOTE_MODULE>;
+export type EventContext = Omit<__EventContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The context type returned in callbacks for reducer events. */
-export type ReducerEventContext = __ReducerEventContextInterface<typeof REMOTE_MODULE>;
+export type ReducerEventContext = Omit<__ReducerEventContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The context type returned in callbacks for subscription events. */
-export type SubscriptionEventContext = __SubscriptionEventContextInterface<typeof REMOTE_MODULE>;
+export type SubscriptionEventContext = Omit<__SubscriptionEventContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The context type returned in callbacks for error events. */
-export type ErrorContext = __ErrorContextInterface<typeof REMOTE_MODULE>;
+export type ErrorContext = Omit<__ErrorContextInterface<typeof REMOTE_MODULE>, "db"> & { db: DbView };
 /** The subscription handle type to manage active subscriptions created from a {@link SubscriptionBuilder}. */
 export type SubscriptionHandle = __SubscriptionHandleImpl<typeof REMOTE_MODULE>;
 
@@ -275,6 +334,13 @@ export class DbConnectionBuilder extends __DbConnectionBuilder<DbConnection> {}
 
 /** The typed database connection to manage connections to the remote SpacetimeDB instance. This class has type information specific to the generated module. */
 export class DbConnection extends __DbConnectionImpl<typeof REMOTE_MODULE> {
+  declare db: DbView;
+
+  constructor(config: __DbConnectionConfig<typeof REMOTE_MODULE>) {
+    super(config);
+    this.db = __withTableAccessorAliases(this.db) as DbView;
+  }
+
   /** Creates a new {@link DbConnectionBuilder} to configure and connect to the remote SpacetimeDB instance. */
   static builder = (): DbConnectionBuilder => {
     return new DbConnectionBuilder(REMOTE_MODULE, (config: __DbConnectionConfig<typeof REMOTE_MODULE>) => new DbConnection(config));
