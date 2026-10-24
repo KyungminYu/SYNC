@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { simulate } from '../../sync/mock/scenario';
 import { normalizeRun } from './normalize';
-import { sceneAt } from './scene';
+import { GUEST_KINDS, guestKind, sceneAt } from './scene';
 import { decisionsAt } from './decisions';
 import { buildLanes } from './lanes';
 import type { SyncEvent } from '../../sync/contract';
@@ -297,20 +297,63 @@ describe('order line timing, folding and waiting capacity', () => {
     }
   });
 
-  it('widens to 6 columns above 10 waiting, then adds rows and a taller board', () => {
+  it('adds waiting rows (never a 6th column) above 10 and grows the board downward', () => {
     const ten = buildLanes(run.layout, 10);
     const twelve = buildLanes(run.layout, 12);
     const fifteen = buildLanes(run.layout, 15);
     expect(ten.waitingSpots).toHaveLength(10);
-    expect(twelve.waitingSpots).toHaveLength(12);
-    expect(twelve.wallY).toBeCloseTo(ten.wallY);
-    expect(fifteen.waitingSpots.length).toBeGreaterThanOrEqual(15);
-    expect(fifteen.wallY).toBeGreaterThan(ten.wallY);
+    // 11–15 waiting: a third row of 5; the front wall moves down one row.
+    expect(twelve.waitingSpots).toHaveLength(15);
+    expect(fifteen.waitingSpots).toHaveLength(15);
+    expect(twelve.wallY).toBeCloseTo(ten.wallY + 1);
+    // Columns never reach the exit lane.
+    const maxX = Math.max(...fifteen.waitingSpots.map((s) => s.x));
+    expect(maxX).toBeLessThan(fifteen.exitX - 0.5);
     // Every spot but the front row opens onto an aisle.
     const rows = [...new Set(fifteen.waitingSpots.map((s) => s.y))].sort(
       (a, b) => a - b,
     );
     for (const s of fifteen.waitingSpots)
       expect(s.aisleY === undefined).toBe(s.y === rows[0]);
+  });
+});
+
+describe('pixel-art presentation data', () => {
+  it('assigns guest kinds a–j with a seeded random draw', () => {
+    const ids = Array.from({ length: 200 }, (_, i) => `c${i + 1}`);
+    const kinds = ids.map((id) => guestKind(5, id));
+    // Deterministic for the same seed, reshuffled by another seed, and all 10 kinds appear.
+    expect(ids.map((id) => guestKind(5, id))).toEqual(kinds);
+    expect(ids.map((id) => guestKind(6, id))).not.toEqual(kinds);
+    expect(new Set(kinds)).toEqual(new Set(GUEST_KINDS));
+    const s = sceneAt(run, 120);
+    for (const c of s.customers)
+      expect(c.guest).toBe(guestKind(run.run.seed, c.id));
+  });
+
+  it('faces people the way they walk and sensibly when standing', () => {
+    for (let t = 1; t < 300; t += 0.5) {
+      const s = sceneAt(run, t);
+      const before = sceneAt(run, t - 0.3);
+      for (const c of s.customers) {
+        // Only people who have been standing still for a moment use the standing direction.
+        const was = before.customers.find((p) => p.id === c.id);
+        if (!was || was.x !== c.x || was.y !== c.y) continue;
+        if (c.stage === 'leaving') expect(c.facing).toBe('down');
+        if (c.stage === 'waiting') expect(c.facing).toBe('up');
+      }
+    }
+    // A customer walking from the register to the waiting area first steps down, then right.
+    const job = run.jobs[3];
+    const done = run.events.find(
+      (e) => e.type === 'task.finished' && e.taskId === `${job.id}.order`,
+    )!;
+    expect(
+      sceneAt(run, done.t + 0.05).customers.find((c) => c.id === job.id)
+        ?.facing,
+    ).toBe('down');
+    expect(
+      sceneAt(run, done.t + 0.6).customers.find((c) => c.id === job.id)?.facing,
+    ).toBe('right');
   });
 });

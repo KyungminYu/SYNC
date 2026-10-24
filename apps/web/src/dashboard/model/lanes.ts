@@ -56,19 +56,23 @@ export interface Lanes {
   staffAisleY: number;
 }
 
-/** Waiting spots per row: 5 normally, 6 when more than 10 people wait. */
-const NARROW_ROW = 5;
-const WIDE_ROW = 6;
-/** Gap between people in the order line, grid units. */
-const QUEUE_SPACING = 0.6;
+/**
+ * Waiting spots per row. Always 5: a sixth column would stand on the exit
+ * lane, so more people get more rows instead (the board grows downward).
+ */
+const SPOTS_PER_ROW = 5;
+/** Gap between two pairs of waiting rows (back-to-back rows), grid units: one tile. */
+const PAIR_GAP = 1;
+/** Gap between people in the order line, grid units (one tile). */
+const QUEUE_SPACING = 1;
 
 const zoneOf = (layout: Layout, kind: Zone['kind']) =>
   layout.zones.find((z) => z.kind === kind);
 
 /**
  * Builds the lane network for a run. `waitingCapacity` is the most people that
- * ever wait for pickup at once: up to 10 fits the 5 × 2 grid, up to 12 adds a
- * sixth column, more adds rows (and the front wall, so the board, moves down).
+ * ever wait for pickup at once: up to 10 fits the 5 × 2 grid; each further 5
+ * adds a row, and the front wall (so the board) moves down by that row.
  */
 export function buildLanes(layout: Layout, waitingCapacity = 10): Lanes {
   const registers = layout.resources.filter((r) => r.type === 'register');
@@ -76,7 +80,8 @@ export function buildLanes(layout: Layout, waitingCapacity = 10): Lanes {
     (r) => r.type === 'register' || r.type === 'pickup',
   );
   const counterRow = Math.max(...counters.map((r) => r.y), 0);
-  const standY = counterRow + 0.9;
+  // Customers stand on the tile in front of the counter row.
+  const standY = counterRow + 1;
   const counterY = standY + 0.4;
   const headX = registers.length
     ? registers.reduce((s, r) => s + r.x, 0) / registers.length
@@ -115,21 +120,20 @@ export function buildLanes(layout: Layout, waitingCapacity = 10): Lanes {
   const wh = waiting?.h ?? 1.6;
   const firstRow = wy + 0.27;
   const rowGap = wh - 0.54; // front row → back row of one pair
-  const step = (ww - 0.56) / (NARROW_ROW - 1);
-  const perRow = waitingCapacity > 2 * NARROW_ROW ? WIDE_ROW : NARROW_ROW;
-  const rows = Math.max(2, Math.ceil(waitingCapacity / perRow));
+  const step = (ww - 0.56) / (SPOTS_PER_ROW - 1);
+  const rows = Math.max(2, Math.ceil(waitingCapacity / SPOTS_PER_ROW));
   const waitingSpots: WaitingSpot[] = [];
   const rowY: number[] = [];
   for (let r = 0; r < rows; r++) {
     const pair = Math.floor(r / 2);
-    const pairTop = firstRow + pair * (rowGap + 0.7);
+    const pairTop = firstRow + pair * (rowGap + PAIR_GAP);
     rowY.push(r % 2 === 0 ? pairTop : pairTop + rowGap);
   }
   for (let r = 0; r < rows; r++) {
     const pair = Math.floor(r / 2);
-    const pairTop = firstRow + pair * (rowGap + 0.7);
+    const pairTop = firstRow + pair * (rowGap + PAIR_GAP);
     const aisleY = pairTop + rowGap / 2;
-    for (let i = 0; i < perRow; i++)
+    for (let i = 0; i < SPOTS_PER_ROW; i++)
       waitingSpots.push({
         x: wx + 0.28 + i * step,
         y: rowY[r],
@@ -140,7 +144,9 @@ export function buildLanes(layout: Layout, waitingCapacity = 10): Lanes {
 
   // Front wall: the entrance zone's bottom, or lower if extra rows need room.
   const baseWall = entrance ? entrance.y + entrance.h : qy + qh + 0.6;
-  const wallY = Math.max(baseWall, rowY[rows - 1] + 0.57);
+  // Extra rows push the front wall down by exactly their height, so the
+  // door row below the waiting area always stays clear.
+  const wallY = baseWall + Math.max(0, rowY[rows - 1] - rowY[1]);
   const exitX = exit ? exit.x + exit.w / 2 : wx + ww + 0.8;
   const doorSpan = (z: Zone | undefined, x: number): [number, number] =>
     z ? [z.x, z.x + z.w] : [x - 0.4, x + 0.4];
@@ -162,8 +168,8 @@ export function buildLanes(layout: Layout, waitingCapacity = 10): Lanes {
     foldAfter,
     // Open at the U-turn end (right).
     rope: [
-      { x: doorX, y: row1 + (row2 - row1) * 0.66 },
-      { x: turnX - 0.43, y: row1 + (row2 - row1) * 0.66 },
+      { x: doorX, y: row1 + (row2 - row1) * 0.5 },
+      { x: turnX - 1, y: row1 + (row2 - row1) * 0.5 },
     ],
     waitingSpots,
     spurX,

@@ -242,7 +242,7 @@ input:focus-visible {
 }
 .floor {
   width: 100%;
-  aspect-ratio: 750 / 474;
+  aspect-ratio: 816 / 480;
   border-radius: 6px;
   overflow: hidden;
   background: var(--bg-page);

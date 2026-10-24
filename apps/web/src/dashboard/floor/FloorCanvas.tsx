@@ -23,7 +23,7 @@ export function FloorCanvas({
   const height = scene
     ? Math.max(
         FLOOR_PX.height,
-        Math.round(GRID.offsetY * 2 + (scene.lanes.wallY + 0.13) * GRID.unit),
+        Math.round(GRID.offsetY * 2 + (scene.lanes.wallY + 0.05) * GRID.unit),
       )
     : FLOOR_PX.height;
   const game = useRef<Phaser.Game | null>(null);
@@ -47,6 +47,8 @@ export function FloorCanvas({
       scene: new FloorScene(() => input.current),
       scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
       audio: { noAudio: true },
+      // Nearest-neighbour scaling keeps the 16 px sprites crisp at 3×.
+      pixelArt: true,
       banner: false,
     });
     game.current = instance;

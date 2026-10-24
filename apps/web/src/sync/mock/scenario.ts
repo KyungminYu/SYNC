@@ -128,20 +128,24 @@ const WALK_IN = 2;
 /** SYNC sample only: send a server to pickup when the drinks finish within this many seconds. */
 const PREPOSITION_WINDOW = 6;
 
-/** Slot id, type, label and centre in grid units (matches the Figma layout draft). */
+/**
+ * Slot id, type, label and centre in grid units. One grid unit = one 48 px
+ * pixel-art tile; the floor is 17 × 10 tiles, matching Figma "Pixel floor ·
+ * draft v1" (tile centres are column + 0.5).
+ */
 const SLOT_POS: Array<[string, ResourceType, string, number, number]> = [
-  ['reg1', 'register', 'Register 1', 2.1, 4.25],
-  ['reg2', 'register', 'Register 2', 3.7, 4.25],
-  ['bar1', 'bar', 'Bar 1', 5.75, 1.35],
-  ['bar2', 'bar', 'Bar 2', 7.35, 1.35],
-  ['pick1', 'pickup', 'Pickup 1', 9.0, 4.25],
-  ['pick2', 'pickup', 'Pickup 2', 10.6, 4.25],
-  ['clean1', 'clean', 'Clean 1', 11.6, 1.35],
+  ['reg1', 'register', 'Register 1', 2.5, 4.5],
+  ['reg2', 'register', 'Register 2', 4.5, 4.5],
+  ['bar1', 'bar', 'Bar 1', 5.5, 1.5],
+  ['bar2', 'bar', 'Bar 2', 7.5, 1.5],
+  ['pick1', 'pickup', 'Pickup 1', 11.5, 4.5],
+  ['pick2', 'pickup', 'Pickup 2', 13.5, 4.5],
+  ['clean1', 'clean', 'Clean 1', 14.5, 1.5],
 ];
 /** Where staff stand to work a slot: behind the counter (front row) or at the bar (back row). */
 const STAND_Y: Record<ResourceType, number> = {
-  register: 3.05,
-  pickup: 3.05,
+  register: 3.5,
+  pickup: 3.5,
   bar: 2.5,
   clean: 2.5,
 };
@@ -160,10 +164,10 @@ const ROLE_NAME: Record<Role, string> = {
 };
 /** Starting position per role, in grid units. */
 const HOME: Record<Role, [number, number]> = {
-  cashier: [2.9, 3.05],
-  barista: [6.55, 2.5],
-  server: [9.8, 3.05],
-  cleaner: [11.6, 2.5],
+  cashier: [2.5, 3.5],
+  barista: [5.5, 2.5],
+  server: [11.5, 3.5],
+  cleaner: [14.5, 2.5],
 };
 
 /** Small deterministic PRNG (LCG) so a seed always reproduces the same run. */
@@ -212,10 +216,10 @@ export function buildLayout(staff: ScenarioOptions['staff'] = {}): Layout {
         id: 'staff',
         kind: 'staff',
         label: 'Staff',
-        x: 0.9,
-        y: 0.15,
-        w: 11.6,
-        h: 3.55,
+        x: 0,
+        y: 0,
+        w: 17,
+        h: 5,
       },
       // Customer-side areas (docs/SCENARIO.md §2). The UI turns them into lanes:
       // doors in the front wall, a 2-row switchback queue, a 5 × 2 grid of
@@ -224,37 +228,37 @@ export function buildLayout(staff: ScenarioOptions['staff'] = {}): Layout {
         id: 'entrance',
         kind: 'entrance',
         label: 'Entrance',
-        x: 0,
-        y: 7.5,
-        w: 0.88,
-        h: 0.12,
+        x: 1,
+        y: 9,
+        w: 1,
+        h: 0.95,
       },
       {
         id: 'queue',
         kind: 'queue',
         label: 'Line',
-        x: 0.44,
-        y: 5.85,
-        w: 6.52,
-        h: 1.26,
+        x: 1.5,
+        y: 6.3,
+        w: 8,
+        h: 2.4,
       },
       {
         id: 'waiting',
         kind: 'waiting',
         label: 'Waiting',
-        x: 8.32,
-        y: 5.67,
-        w: 3.17,
-        h: 1.65,
+        x: 11.22,
+        y: 6.23,
+        w: 4.56,
+        h: 2.54,
       },
       {
         id: 'exit',
         kind: 'exit',
         label: 'Exit',
-        x: 11.9,
-        y: 7.5,
-        w: 0.76,
-        h: 0.12,
+        x: 16,
+        y: 9,
+        w: 1,
+        h: 0.95,
       },
     ],
   };
