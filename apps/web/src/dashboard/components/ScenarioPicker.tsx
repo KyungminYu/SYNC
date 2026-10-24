@@ -14,6 +14,7 @@ export function ScenarioPicker({
   showMeta,
   onSelect,
   onRun,
+  onStop,
   footnote,
 }: {
   options: ScenarioOption[];
@@ -23,12 +24,21 @@ export function ScenarioPicker({
   onSelect(id: string): void;
   /** Plays a scenario (again); rows show Run / Rerun when given. */
   onRun?(id: string): Promise<void>;
+  /** Stops the running scenario; its row then shows Stop instead of "…". */
+  onStop?(): Promise<void>;
   /** One line under the list. */
   footnote?: string;
 }) {
   const [open, setOpen] = useState(false);
-  /** Run request state: the scenario being started, or the last error. */
-  const [run, setRun] = useState<{ busy?: string; error?: string }>({});
+  /**
+   * Run request state: the scenario being played (its start resolves when the
+   * run ends), whether a stop is in flight, or the last error.
+   */
+  const [run, setRun] = useState<{
+    busy?: string;
+    stopping?: boolean;
+    error?: string;
+  }>({});
   const root = useRef<HTMLDivElement>(null);
   const current = options.find((o) => o.id === value);
 
@@ -58,15 +68,42 @@ export function ScenarioPicker({
     else groups.push([o.group, [o]]);
   }
 
-  /** Run / Rerun label; a running scenario cannot be started again. */
+  /** Running: in the database, or the one this menu is playing right now. */
+  const running = (o: ScenarioOption) =>
+    !!o.meta?.startsWith('running') || run.busy === o.id;
+  /** Run / Rerun, or Stop for the running scenario (when stopping is possible). */
   const action = (o: ScenarioOption) =>
-    run.busy === o.id
-      ? 'Running…'
-      : o.meta?.startsWith('running')
-        ? '…'
-        : o.disabled
-          ? '▶ Run'
-          : '↻ Rerun';
+    running(o)
+      ? onStop
+        ? run.stopping
+          ? 'Stopping…'
+          : '■ Stop'
+        : run.busy === o.id
+          ? 'Running…'
+          : '…'
+      : o.disabled
+        ? '▶ Run'
+        : '↻ Rerun';
+  const stop = () => {
+    setRun((r) => ({ ...r, stopping: true }));
+    onStop!().then(
+      () => setRun({}),
+      (e: Error) => setRun({ error: e.message }),
+    );
+  };
+  const start = (id: string) => {
+    setRun({ busy: id });
+    onRun!(id).then(
+      () => {
+        setRun({});
+        setOpen(false);
+      },
+      (e: Error) => {
+        setRun({ error: e.message });
+        setOpen(true);
+      },
+    );
+  };
 
   return (
     <div className="scenario-picker" ref={root}>
@@ -119,21 +156,15 @@ export function ScenarioPicker({
                   </button>
                   {onRun && (
                     <button
-                      className="run"
-                      disabled={!!run.busy}
-                      onClick={() => {
-                        setRun({ busy: o.id });
-                        onRun(o.id).then(
-                          () => {
-                            setRun({});
-                            setOpen(false);
-                          },
-                          (e: Error) => {
-                            setRun({ error: e.message });
-                            setOpen(true);
-                          },
-                        );
-                      }}
+                      className={running(o) && onStop ? 'run stop' : 'run'}
+                      disabled={
+                        running(o) && onStop
+                          ? !!run.stopping
+                          : !!run.busy || running(o)
+                      }
+                      onClick={() =>
+                        running(o) && onStop ? stop() : start(o.id)
+                      }
                     >
                       {action(o)}
                     </button>

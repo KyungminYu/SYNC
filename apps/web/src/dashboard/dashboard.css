@@ -315,6 +315,19 @@ input:focus-visible {
   color: #17732f;
   background: #e6f7eb;
 }
+/* Stops the live scenario (Figma "stop live run"). */
+.stop-pill {
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: #fde6e6;
+  color: #b32626;
+  font-size: 12px;
+  font-weight: 500;
+}
+.picker-row .run.stop {
+  color: #ffbfbf;
+}
 .clock-pill .dot {
   background: #17732f;
 }
