@@ -503,6 +503,38 @@ export function sceneAt(
         ];
   const fromSpot = (spot: WaitingSpot, to: Point): Point[] =>
     [...toSpot(to, spot)].reverse();
+  /**
+   * Called to pickup: the walk from where the customer stands at the call
+   * (at their spot, still walking to it, or at the lane end) to the counter.
+   */
+  const readyWalk = (
+    id: string,
+    c: {
+      register?: string;
+      orderEnd?: number;
+      handoffStart?: number;
+      pickup?: string;
+    },
+    spot: WaitingSpot | undefined,
+  ) => {
+    const to = counterAt(c.pickup);
+    const from =
+      c.orderEnd === undefined
+        ? counterAt(c.register)
+        : walkAt(waitingRoute(c, spot), c.orderEnd, c.handoffStart!);
+    const route =
+      spot && 'done' in from && from.done
+        ? // At the spot: leave it (waiting for a busy aisle).
+          fromSpot(spot, to)
+        : // Still walking there, or no spot: straight from here.
+          [
+            from,
+            { x: from.x, y: lanes.counterY },
+            { x: to.x, y: lanes.counterY },
+            to,
+          ];
+    return { route, start: aisleStart.get(id) ?? c.handoffStart! };
+  };
   /** Register → waiting spot, or → end of the counter lane when no spot is free. */
   const waitingRoute = (
     c: { register?: string },
@@ -602,32 +634,19 @@ export function sceneAt(
       // the end of the counter lane), then stay there.
       p = walkAt(waitingRoute(c, spot), c.orderEnd!, t);
     } else if (c.stage === 'ready') {
-      // Called: go to pickup from where they stand, never from elsewhere.
-      const to = counterAt(c.pickup);
-      const from =
-        c.orderEnd === undefined
-          ? counterAt(c.register)
-          : walkAt(waitingRoute(c, spot), c.orderEnd, c.handoffStart!);
-      const route =
-        spot && 'done' in from && from.done
-          ? // At the spot: leave it (waiting for a busy aisle).
-            fromSpot(spot, to)
-          : // Still walking there, or no spot: straight from here.
-            [
-              from,
-              { x: from.x, y: lanes.counterY },
-              { x: to.x, y: lanes.counterY },
-              to,
-            ];
-      p = walkAt(route, aisleStart.get(id) ?? c.handoffStart!, t);
+      const walk = readyWalk(id, c, spot);
+      p = walkAt(walk.route, walk.start, t);
     } else {
       // Served: counter lane to the exit lane, then out through the door.
-      // Leave from the pickup counter, or, when never called to one (the
-      // order completed without a hand-off at a counter), from where they
-      // waited; never from the register area.
-      const pick =
-        c.pickup !== undefined || c.orderEnd === undefined
-          ? counterAt(c.pickup)
+      // Leave from where they are when served: on the way to (or at) the
+      // pickup counter, or, when never called to one (the order completed
+      // without a hand-off at a counter), where they waited; never from a
+      // counter they had not reached.
+      const walk = c.pickup !== undefined ? readyWalk(id, c, spot) : undefined;
+      const pick = walk
+        ? walkAt(walk.route, walk.start, c.completed!)
+        : c.orderEnd === undefined
+          ? counterAt(c.register)
           : walkAt(waitingRoute(c, spot), c.orderEnd, c.completed!);
       const route = [
         pick,

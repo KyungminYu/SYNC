@@ -332,6 +332,29 @@ describe('one person per role and per slot', () => {
     expect(at.find((a) => a.id === 'server')).toMatchObject({ state: 'idle', x: 11.5, y: 3.5 });
   });
 
+  it('hands drinks over at a pickup counter even when a Baseline cashier does it', () => {
+    // The engine's cashier 1 delivers order 12: still at a pickup, never a register.
+    const data = normalizeRun(
+      mapRun(
+        {
+          ...rows,
+          tasks: rows.tasks.map((t) =>
+            t.kind === 'deliver_order' && t.orderId === 12n ? { ...t, workerId: 1n } : t,
+          ),
+        },
+        'baseline',
+      ),
+    );
+    const handoffs = data.events.filter((e) => {
+      const k = data.tasks.find((x) => x.id === e.taskId);
+      return e.type === 'task.started' && k?.type === 'pickup' && k.customerHandoff !== false;
+    });
+    expect(handoffs.length).toBeGreaterThan(0);
+    for (const e of handoffs)
+      expect(data.layout.resources.find((r) => r.id === e.resourceId)?.type).toBe('pickup');
+    expect(checkRun(data)).toEqual([]);
+  });
+
   it('never moves Baseline staff; cross-role work is done at their own slot', () => {
     const helped = normalizeRun(
       mapRun(

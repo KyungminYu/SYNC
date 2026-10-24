@@ -432,8 +432,14 @@ export function mapRun(
     let who = home.agentId;
     let station: string | undefined;
     if (fixed.has(who)) {
-      // Baseline: everything is done at the person's own slot (no walking).
-      station = isFree(who) ? homeOf(who) : agentAt.get(who);
+      // Baseline: everything is done at the person's own slot (no walking),
+      // except handing drinks to a customer: that happens at a pickup
+      // counter (shown on the slot alone when a cashier does it), so a
+      // customer is never served at a register.
+      const at = isFree(who) ? homeOf(who) : agentAt.get(who);
+      const servesCustomer = type === 'pickup' && task.kind !== 'prepare_cups';
+      station =
+        servesCustomer && typeOf.get(at ?? '') !== type ? undefined : at;
     } else {
       // Keep your post (Figma "Staff rules v5"): the slot type's own person
       // takes it at their own slot, or — when busy — at the slot they are
