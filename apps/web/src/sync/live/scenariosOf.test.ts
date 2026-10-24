@@ -31,7 +31,9 @@ it('never pairs a rerun with the previous counterpart and retains completed samp
       status: 'paused',
     },
   ];
-  expect(scenariosOf(runs)[0].runs.sync).toBeUndefined();
+  // Half of the new pair is not shown yet: the old pair stays, unmixed.
+  const [live] = scenariosOf(runs);
+  expect([live.runs.baseline?.id, live.runs.sync?.id]).toEqual([1n, 2n]);
   expect(scenariosOf(runs, true)[0].runs.sync?.id).toBe(2n);
 });
 
