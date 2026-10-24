@@ -49,7 +49,8 @@ const TERMS: Term[] = [
     value: (s) => s.planningMs,
     text: (s) => `${s.planningMs} ms total`,
     // Leave headroom so the longer bar does not fill the whole track.
-    scale: (both) => Math.max(0.1, ...both.map((s) => s.planningMs)) * 1.15,
+    scale: (both) =>
+      Math.max(0.1, ...both.map((s) => s.planningMs ?? 0)) * 1.15,
   },
   {
     sign: '−',
@@ -70,22 +71,27 @@ function summary(baseline: Score, sync: Score) {
       : `${round(Math.abs(n))} ${n > 0 ? more : fewer} ${unit}`;
   const orders = sync.completedInT - baseline.completedInT;
   const late = sync.lateCount - baseline.lateCount;
-  const planning = sync.planningMs - baseline.planningMs;
-  return (
+  const head =
     `SYNC finished ${diff(orders, 'more', 'fewer', 'orders')} in ${sync.T} s ` +
-    `and left ${diff(late, 'more', 'fewer', 'customers late')}, ` +
-    `for ${diff(planning, 'more', 'less', 'ms planning time')}.`
-  );
+    `and left ${diff(late, 'more', 'fewer', 'customers late')}`;
+  // Planning time joins the sentence only when both runs measured it.
+  if (sync.planningMs === null || baseline.planningMs === null)
+    return `${head}.`;
+  const planning = sync.planningMs - baseline.planningMs;
+  return `${head}, for ${diff(planning, 'more', 'less', 'ms planning time')}.`;
 }
 
 export function Scorecard({
   sync,
   baseline,
   benchmark,
+  seedLine = true,
 }: {
   sync?: Score;
   baseline?: Score;
   benchmark?: BenchmarkSummary;
+  /** False when the source never sends a seed comparison (live): hides the pending line. */
+  seedLine?: boolean;
 }) {
   const scores: Partial<Record<Series, Score>> = { baseline, sync };
   const present = [baseline, sync].filter((s): s is Score => !!s);
@@ -162,11 +168,13 @@ export function Scorecard({
             ? summary(baseline, sync)
             : 'Waiting for both runs…'}
         </p>
-        <span>
-          {benchmark
-            ? `${benchmark.seeds} seeds: ${benchmark.meanDiff >= 0 ? '+' : ''}${benchmark.meanDiff.toFixed(2)} orders (± ${benchmark.ci95.toFixed(2)})`
-            : 'Seed comparison pending…'}
-        </span>
+        {(benchmark || seedLine) && (
+          <span>
+            {benchmark
+              ? `${benchmark.seeds} seeds: ${benchmark.meanDiff >= 0 ? '+' : ''}${benchmark.meanDiff.toFixed(2)} orders (± ${benchmark.ci95.toFixed(2)})`
+              : 'Seed comparison pending…'}
+          </span>
+        )}
       </div>
       <p className="formula">
         Objective (20): maximize Σ v_i · 1{'{'}f_i ≤ T and success{'}'} −
