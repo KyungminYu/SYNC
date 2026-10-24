@@ -490,6 +490,13 @@ export const ui_metrics = db.view(
       const coordination = s.telemetry.filter(
         (t) => t.source === 'coordinator',
       );
+      // The score counts reported coordination (planning) time as δ·C_coord.
+      const score = evaluateRun(
+        s,
+        s.run.tick,
+        undefined,
+        coordination.reduce((n, t) => n + t.wallMilliseconds, 0),
+      );
       return {
         run_id: s.run.id,
         tick: s.run.tick,
@@ -514,9 +521,9 @@ export const ui_metrics = db.view(
           .length,
         total_workers: s.workers.length,
         active_workers: s.workers.filter((w) => w.enabled).length,
-        reward: evaluateRun(s, s.run.tick).reward,
-        penalty: evaluateRun(s, s.run.tick).penalty,
-        net_reward: evaluateRun(s, s.run.tick).netReward,
+        reward: score.reward,
+        penalty: score.penalty,
+        net_reward: score.netReward,
         dirty_or_in_use_trays: s.trays.filter((t) => t.state !== 'clean')
           .length,
         modeled_spent_microusd: s.run.modeledSpentMicrousd,
