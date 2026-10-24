@@ -38,7 +38,7 @@ it('renders the mock runs through the port: floors, scorecard, decisions, sample
   expect(screen.getByText(/^SYNC finished/)).toBeTruthy();
   // Service speed sits apart from the scored terms.
   const speed = screen.getByLabelText('Service speed (not scored)');
-  expect(speed.textContent).toMatch(/Last order done/);
+  expect(speed.textContent).not.toMatch(/Last order done/);
   expect(speed.textContent).toMatch(/Average wait/);
 
   fireEvent.change(screen.getByLabelText('Simulated time'), {

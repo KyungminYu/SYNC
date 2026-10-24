@@ -75,11 +75,6 @@ const SPEED: Array<{
   value: (s: ServiceSpeed) => number | null;
 }> = [
   {
-    label: 'Last order done',
-    hint: 'earlier is better · not part of the score',
-    value: (s) => s.lastDone,
-  },
-  {
     label: 'Average wait',
     hint: 'arrival → served · not part of the score',
     value: (s) => s.meanWait,
