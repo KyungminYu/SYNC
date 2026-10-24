@@ -44,7 +44,7 @@ export interface DriveOptions {
 }
 
 /** Tick the first customer walks in at (a short lead-in before the rush). */
-const FIRST_ARRIVAL_TICK = 3;
+const FIRST_ARRIVAL_TICK = 1;
 
 /** Customer deadline: 90 s after walking in (the dashboard's arrival + 90 rule). */
 const DEADLINE_FROM_DOOR = 90;
@@ -97,7 +97,9 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
     throw new Error('Invalid scenario customer or menu item.');
   if (new Set(o.customers.map((c) => c.id)).size !== o.customers.length)
     throw new Error('Duplicate scenario customer id.');
-  const ids: bigint[] = [];
+  // Create both runs first, then share them together, so viewers get the
+  // Baseline/SYNC pair at once (not Baseline alone for a few seconds).
+  const created: Array<{ r: (typeof runs)[number]; id: bigint }> = [];
   for (const r of runs) {
     if (signal?.aborted) return;
     const before = new Set([...conn.db.uiRuns.iter()].map((x) => x.id));
@@ -115,24 +117,30 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
         ),
       `run "${r.name}"`,
     );
-    // Policy and viewer grants go out together (the engine is slow per call).
-    await Promise.all([
+    created.push({ r, id: run.id });
+  }
+  // Policies and viewer grants of both runs go out together (the engine is
+  // slow per call).
+  await Promise.all(
+    created.flatMap(({ r, id }) => [
       conn.reducers.setPolicy({
-        runId: run.id,
+        runId: id,
         configJson: JSON.stringify({ policy: r.policy }),
       }),
       ...(o.viewers ?? []).map((hex) =>
         conn.reducers.grantMember({
-          runId: run.id,
+          runId: id,
           identity: Identity.fromString(hex),
           permission: 'viewer',
           enabled: true,
         }),
       ),
-    ]);
-    ids.push(run.id);
-    log(`run ${run.id}: ${r.name}`);
-  }
+    ]),
+  );
+  const ids = created.map(({ r, id }) => {
+    log(`run ${id}: ${r.name}`);
+    return id;
+  });
   o.onRuns?.({ baseline: ids[0], sync: ids[1] });
 
   // A customer's orders enter the engine the moment they walk in (the
