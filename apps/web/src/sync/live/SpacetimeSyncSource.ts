@@ -1,35 +1,292 @@
-import type { SyncSnapshot, SyncSource } from '../source';
+import { DbConnection } from '@sync/bindings';
+import { env } from '../../lib/env';
+import type { Policy } from '../contract';
+import type { ScenarioOption, SyncSnapshot, SyncSource } from '../source';
+import { mapRun, type DecisionRow, type RunRow, type RunRows } from './mapRun';
+import { LOADS, parseRunName } from './scenarioNames';
 
 /**
- * Real-backend adapter slot. Replaces MockSyncSource without dashboard changes.
+ * Read-only SpacetimeDB adapter: subscribes to the `ui_*` views and turns the
+ * rows into contract RunData (LIVE_SPACETIMEDB_DESIGN.md §4). It never writes
+ * to the database; runs are created and stepped elsewhere (scripts/feed-scenario.ts).
  *
- * To implement: subscribe to the SpacetimeDB tables through @sync/bindings and
- * map rows onto the contract in ../contract.ts. The current module tables
- * (run, task, worker, resource, decision, executionEvent) do not yet carry
- * what the contract needs:
- *   - resource.type and grid coordinates, zones
- *   - worker.role / primaryTypes
- *   - jobs (customers) with arrival, deadline and task ids
- *   - decision kind, crossRole, summary, candidates, admission
- *   - agent.move / agent.wait events
- *   - score and benchmark_summary rows
- * Until they do, this adapter reports itself as disconnected instead of
- * inventing values.
+ * Runs pair up into scenarios by name ("Mid-2 · Baseline" + "Mid-2 · SYNC",
+ * see scenarioNames.ts). Modes:
+ *   live   — every scenario in the database; follows the newest one until the
+ *            user picks another, and shows it as rows change.
+ *   stored — finished scenarios only, replayed from the start.
  */
+export type SpacetimeMode = 'live' | 'stored';
+
+/** Views this adapter reads. */
+const QUERIES = [
+  'SELECT * FROM ui_runs',
+  'SELECT * FROM ui_orders',
+  'SELECT * FROM ui_tasks',
+  'SELECT * FROM ui_workers',
+  'SELECT * FROM ui_decisions',
+  'SELECT * FROM ui_metrics',
+];
+/** localStorage key for this browser's identity token (one per server + database). */
+const TOKEN_KEY = `sync-token:${env.VITE_SPACETIMEDB_URI}:${env.VITE_SPACETIMEDB_DATABASE}`;
+/** Rebuild at most this often (ms); one engine tick changes many rows. */
+const REBUILD_MS = 150;
+
+/** Reads a stored token; storage can be unavailable (private mode). */
+function loadToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+function saveToken(token: string) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // Without storage the next visit gets a new identity; nothing else breaks.
+  }
+}
+
+/** A Baseline/SYNC pair of runs that share a scenario id. */
+interface Scenario {
+  id: string;
+  load: string;
+  n: number;
+  runs: Partial<Record<Policy, RunRow>>;
+}
+
+/** Groups runs by scenario id; runs with other names are ignored. */
+function scenariosOf(runs: RunRow[]): Scenario[] {
+  const byId = new Map<string, Scenario>();
+  for (const run of runs) {
+    const p = parseRunName(run.name);
+    if (!p) continue;
+    const s = byId.get(p.scenario) ?? { id: p.scenario, load: p.load, n: p.n, runs: {} };
+    // Keep the newest run if a name repeats.
+    const old = s.runs[p.policy];
+    if (!old || old.id < run.id) s.runs[p.policy] = run;
+    byId.set(p.scenario, s);
+  }
+  return [...byId.values()].sort(
+    (a, b) =>
+      LOADS.indexOf(a.load as never) - LOADS.indexOf(b.load as never) || a.n - b.n,
+  );
+}
+
+const done = (s: Scenario) =>
+  s.runs.baseline?.status === 'completed' && s.runs.sync?.status === 'completed';
+/** Highest run id in a scenario: the most recently created one. */
+const newestId = (s: Scenario) =>
+  [s.runs.baseline?.id ?? 0n, s.runs.sync?.id ?? 0n].reduce((a, b) => (a > b ? a : b));
+
 export class SpacetimeSyncSource implements SyncSource {
   readonly origin = 'live' as const;
-  readonly delivery = 'stream' as const;
-  private snapshot: SyncSnapshot = {
-    status: {
-      kind: 'disconnected',
-      reason:
-        'Live adapter not implemented: backend tables do not yet provide the dashboard contract (see INTERFACE.md).',
-    },
-    runs: {},
+  readonly label: string;
+  readonly delivery: 'replay' | 'stream';
+  readonly clockNote?: string;
+  private snapshot: SyncSnapshot = { status: { kind: 'connecting' }, runs: {} };
+  private listeners = new Set<() => void>();
+  private conn?: DbConnection;
+  private timer?: ReturnType<typeof setTimeout>;
+  /** Bumped per connect / disconnect; callbacks of older connections are ignored. */
+  private generation = 0;
+  /** Scenario picked in the dropdown; undefined = newest. */
+  private picked?: string;
+  /**
+   * Newest run id per scenario seen so far; a scenario that gets newer runs
+   * (just started or rerun) is followed in live mode.
+   */
+  private known?: Map<string, bigint>;
+  /**
+   * Every decision seen per run. `ui_decisions` keeps only the newest 200,
+   * so older ones are remembered here to keep the full history on screen.
+   */
+  private decisions = new Map<string, Map<string, DecisionRow>>();
+
+  constructor(private readonly mode: SpacetimeMode = 'live') {
+    this.delivery = mode === 'stored' ? 'replay' : 'stream';
+    this.label = mode === 'stored' ? 'SpacetimeDB · saved run' : 'SpacetimeDB';
+    // Live time moves with the database, not with the dashboard's playback.
+    this.clockNote = mode === 'live' ? 'Following SpacetimeDB' : undefined;
+  }
+
+  connect() {
+    this.disconnect();
+    const generation = this.generation;
+    const current = () => this.generation === generation;
+    this.set({ status: { kind: 'connecting' }, runs: {} });
+    this.conn = DbConnection.builder()
+      .withUri(env.VITE_SPACETIMEDB_URI)
+      .withDatabaseName(env.VITE_SPACETIMEDB_DATABASE)
+      .withToken(loadToken())
+      .onConnect((conn, _identity, token) => {
+        if (!current()) return;
+        saveToken(token);
+        conn
+          .subscriptionBuilder()
+          .onApplied(() => current() && this.rebuild())
+          .onError(
+            () =>
+              current() &&
+              this.set({
+                ...this.snapshot,
+                status: { kind: 'disconnected', reason: 'Subscription failed.' },
+              }),
+          )
+          .subscribe(QUERIES);
+        // Any row change schedules one rebuild.
+        const db = conn.db;
+        for (const table of [
+          db.uiRuns,
+          db.uiOrders,
+          db.uiTasks,
+          db.uiWorkers,
+          db.uiDecisions,
+          db.uiMetrics,
+        ] as Array<{ onInsert(cb: () => void): void; onDelete(cb: () => void): void }>) {
+          table.onInsert(() => current() && this.schedule());
+          table.onDelete(() => current() && this.schedule());
+        }
+      })
+      .onConnectError(
+        (_ctx, error) =>
+          current() &&
+          this.set({
+            ...this.snapshot,
+            status: {
+              kind: 'disconnected',
+              reason: `Cannot reach SpacetimeDB at ${env.VITE_SPACETIMEDB_URI} (${error.message}). Is the local database running (pnpm db:start)?`,
+            },
+          }),
+      )
+      .onDisconnect(
+        () =>
+          current() &&
+          this.set({
+            ...this.snapshot,
+            status: {
+              kind: 'disconnected',
+              reason: 'Lost the connection to SpacetimeDB. The last tick stays on screen.',
+            },
+          }),
+      )
+      .build();
+  }
+
+  disconnect() {
+    this.generation++;
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    const conn = this.conn;
+    this.conn = undefined;
+    conn?.disconnect();
+  }
+
+  getSnapshot = () => this.snapshot;
+
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   };
 
-  connect() {}
-  disconnect() {}
-  getSnapshot = () => this.snapshot;
-  subscribe = () => () => {};
+  selectScenario(id: string) {
+    this.picked = id;
+    this.rebuild();
+  }
+
+  private set(next: SyncSnapshot) {
+    this.snapshot = next;
+    for (const l of this.listeners) l();
+  }
+
+  /** Coalesces bursts of row callbacks into one rebuild. */
+  private schedule() {
+    if (this.timer) return;
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      this.rebuild();
+    }, REBUILD_MS);
+  }
+
+  /** Reads the client cache and publishes a fresh snapshot. */
+  private rebuild() {
+    const conn = this.conn;
+    if (!conn) return;
+    const db = conn.db;
+    let scenarios = scenariosOf([...db.uiRuns.iter()] as RunRow[]);
+    if (this.mode === 'stored') scenarios = scenarios.filter(done);
+    // Live: a scenario with newer runs than before was just (re)started; show it.
+    if (this.mode === 'live') {
+      const fresh = this.known
+        ? scenarios.find((s) => newestId(s) > (this.known!.get(s.id) ?? 0n))
+        : undefined;
+      if (fresh) this.picked = fresh.id;
+      this.known = new Map(scenarios.map((s) => [s.id, newestId(s)]));
+    }
+    // The picked scenario, else the newest one.
+    const chosen =
+      scenarios.find((s) => s.id === this.picked) ??
+      [...scenarios].sort((a, b) => (newestId(a) < newestId(b) ? 1 : -1))[0];
+
+    const orders = [...db.uiOrders.iter()];
+    const tasks = [...db.uiTasks.iter()];
+    const workers = [...db.uiWorkers.iter()];
+    const metrics = [...db.uiMetrics.iter()];
+    for (const d of db.uiDecisions.iter()) {
+      const key = String(d.runId);
+      const seen = this.decisions.get(key) ?? new Map<string, DecisionRow>();
+      seen.set(String(d.sequence), d);
+      this.decisions.set(key, seen);
+    }
+    const rowsFor = (run: RunRow): RunRows => ({
+      run,
+      orders: orders.filter((o) => o.runId === run.id),
+      tasks: tasks.filter((t) => t.runId === run.id),
+      workers: workers.filter((w) => w.runId === run.id),
+      decisions: [...(this.decisions.get(String(run.id))?.values() ?? [])],
+      metrics: metrics.find((m) => m.runId === run.id),
+    });
+    const runs: SyncSnapshot['runs'] = {};
+    for (const p of ['baseline', 'sync'] as Policy[]) {
+      const run = chosen?.runs[p];
+      if (run) runs[p] = mapRun(rowsFor(run), p, undefined, chosen.id);
+    }
+
+    // Dropdown entries: "Mid-2" with its state and tick. Runs advance while
+    // paused between feeder steps, so an unfinished pair counts as running.
+    const options: ScenarioOption[] = scenarios.map((s) => {
+      const run = (s.runs.sync ?? s.runs.baseline)!;
+      return {
+        id: s.id,
+        label: s.id,
+        group: s.load,
+        meta: `${done(s) ? 'completed' : 'running'} · tick ${run.tick}`,
+      };
+    });
+    const identity = conn.identity?.toHexString() ?? '';
+    const pair = chosen
+      ? [chosen.runs.baseline, chosen.runs.sync]
+          .filter(Boolean)
+          .map((r) => `${r!.name} (run ${r!.id})`)
+          .join(' vs ')
+      : '';
+    this.set({
+      status: { kind: 'ready' },
+      runs,
+      scenarios: options,
+      scenarioId: chosen?.id,
+      viewer: identity || undefined,
+      note: chosen
+        ? `${this.mode === 'live' ? 'Subscribed to' : 'Saved result from'} ${env.VITE_SPACETIMEDB_DATABASE} · ${pair} · tick ${(chosen.runs.sync ?? chosen.runs.baseline)!.tick} · 1 tick = 1 s`
+        : undefined,
+      // Runs are private to their owner: the feeder must share them with this browser.
+      emptyHint: chosen
+        ? undefined
+        : {
+            message: `No ${this.mode === 'live' ? '' : 'finished '}scenarios visible to this dashboard (identity ${identity.slice(0, 12)}…). Start one from the scenario menu (top left) on the dev server, or run the feeder:`,
+            command: `corepack pnpm feed --scenario Low-1 --db ${env.VITE_SPACETIMEDB_DATABASE} --viewer ${identity}`,
+          },
+    });
+  }
 }
