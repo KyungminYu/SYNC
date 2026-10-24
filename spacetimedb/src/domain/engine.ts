@@ -447,6 +447,7 @@ export function snapshot(s: State): Snapshot {
       (readPolicy(s).policy !== 'primal_dual' ||
         !admissionBackpressure(s, t.id)),
   );
+  const ownRoleOnly = readPolicy(s).policy === 'fcfs';
   return {
     tick: s.run.tick,
     budgetRemainingMicrousd:
@@ -478,11 +479,15 @@ export function snapshot(s: State): Snapshot {
       .map((w) => ({
         id: w.id,
         capabilities: w.capabilities,
-        estimates: tasks.map((t) => ({
-          taskId: t.id,
-          durationTicks: duration(s, t, w.id),
-          costMicrousd: t.estimatedCostMicrousd,
-        })),
+        // Baseline (fcfs) keeps everyone to their own role's tasks; other
+        // policies may let a capable worker help.
+        estimates: tasks
+          .filter((t) => !ownRoleOnly || t.role === w.role)
+          .map((t) => ({
+            taskId: t.id,
+            durationTicks: duration(s, t, w.id),
+            costMicrousd: t.estimatedCostMicrousd,
+          })),
       })),
     resources: s.resources.map((r) => ({
       id: r.id,

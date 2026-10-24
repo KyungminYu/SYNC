@@ -759,3 +759,15 @@ test('planning weights β, γ, δ are policy fields with safe defaults and bound
     /executionWeight/,
   );
 });
+
+test('Baseline (fcfs) gives each worker only its own role tasks', () => {
+  const s = fresh();
+  setPolicy(s, OWNER, { policy: 'fcfs' });
+  s.run.status = 'running';
+  order(s, 'b-1', 'latte');
+  advanceUntil(s, () => s.tasks.every((t) => t.status === 'succeeded'), 400);
+  for (const t of s.tasks) {
+    const w = s.workers.find((x) => x.id === t.workerId)!;
+    assert.equal(w.role, t.role, `${t.kind} done by ${w.label}`);
+  }
+});
