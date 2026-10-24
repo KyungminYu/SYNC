@@ -9,8 +9,8 @@ import { databaseConfig } from './lib/databaseConfig.mjs';
  *   corepack pnpm feed --scenario Mid-2 [--viewer <identity hex>]
  *                      [--db sync-coffee-live] [--trays 12] [--ms 200]
  *
- * Every scenario uses the mock's customers (seed 5) and turns up one lever:
- * -1 faster arrivals, -2 more drinks, -3 arrivals in groups.
+ * Scenarios differ by customers (12 / 16 / 20) and order size (1, 1–2, 1–3
+ * drinks), ranked by total drinks; arrivals keep the mock's pace (seed 5).
  *
  * Runs are private to their owner (this script). --viewer grants a dashboard
  * identity viewer access; viewers are remembered in .local/feeder-viewers so
@@ -172,7 +172,8 @@ async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
     console.log(
       'no --viewer given: only this feeder identity can see the runs',
     );
-  // The scenario's customers: the mock's (same seed) with its lever applied.
+  // The scenario's customers: the mock's first ones (same seed, same arrival
+  // pace), each ordering the scenario's share of drinks.
   const customers = applyScenario(
     scenario,
     simulate('baseline', { seed: SEED }).jobs.map((job) => ({
