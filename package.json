@@ -22,6 +22,7 @@
     "format:check": "prettier --check .",
     "test": "node scripts/test-domain.mjs && vitest run",
     "test:integration": "tsx scripts/integration.ts",
+    "feed": "tsx scripts/feed-scenario.ts",
     "db:build": "node scripts/db.mjs build",
     "test:domain": "node scripts/test-domain.mjs",
     "test:module": "vitest run"
