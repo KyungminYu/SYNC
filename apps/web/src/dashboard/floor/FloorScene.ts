@@ -1,12 +1,21 @@
 import Phaser from 'phaser';
-import type { Lanes } from '../model/lanes';
 import type {
   AgentView,
   CustomerView,
   Scene as FloorState,
   SlotView,
 } from '../model/scene';
-import { iconKey, iconSources } from './icons';
+import {
+  FURNITURE,
+  guestFrame,
+  SHEETS,
+  SLOT_FRAME,
+  SCALE,
+  staffFrame,
+  TILE_PX,
+  URBAN,
+  WALK_CYCLE,
+} from './sprites';
 import { css, floorTheme as c, GRID, px, py } from './theme';
 
 /** Ids to outline because they belong to the selected decision. */
@@ -22,37 +31,37 @@ export interface FloorInput {
   reducedMotion: boolean;
 }
 
-// Sizes in canvas pixels, taken from the Figma components.
-/** Shop/Slot: 74 × 46, radius 6, progress bar 62 × 3. */
-const SLOT = { w: 74, h: 46, r: 6, bar: 62 };
-/** Shop/StaffToken: ring 36, body 26, icon 14, name 10px below. */
-const STAFF = { ring: 18, body: 13, icon: 14 };
-/** Shop/CustomerToken: token 22, icon 12, id 10px below, late badge 8. */
-const CUSTOMER = { r: 11, icon: 12, badge: 4 };
-/** Role group captions in the staff area (grid positions from the Figma draft). */
-const ROLE_LABELS: Array<[string, number, number, keyof typeof c.role]> = [
-  ['BARISTA SLOTS', 5.0, 0.35, 'barista'],
-  ['CLEANER SLOTS', 10.45, 0.35, 'cleaner'],
-  ['CASHIER SLOTS', 1.35, 2.15, 'cashier'],
-  ['SERVER SLOTS', 8.25, 2.15, 'server'],
-];
+const HALF = TILE_PX / 2;
+/** Feet sit this far below a person's lane position (sprites are drawn bottom-anchored). */
+const FEET = 14;
+/** Wood planks for the staff area (the Kenney packs have no wooden floor tile). */
+const WOOD = { base: 0x9a6b45, gap: 0x6e4a2f, light: 0xad7c53, plank: 12 };
+const WALL = { fill: 0x3b2f2a, skirting: 0x5a463d };
+/** Short slot names on the furniture plates ("Register 1" → "Reg 1"). */
+const SHORT: Record<string, string> = {
+  register: 'Reg',
+  pickup: 'Pick',
+  bar: 'Bar',
+  clean: 'Clean',
+};
 const FONT = 'Inter, system-ui, sans-serif';
 
 /**
- * Draws whatever FloorInput says, styled like the Figma components
- * (Shop/Slot, Shop/StaffToken, Shop/CustomerToken). No event handling and no
- * position maths beyond grid → pixel; the only time-based effect is the
- * decorative pulse on waiting staff.
+ * Pixel-art shop floor (Figma "Pixel floor · draft v1"). Draws whatever
+ * FloorInput says with Kenney CC0 sprites: tiled floors, furniture for slots,
+ * 4-direction characters with a walk cycle, and small overlays (tags,
+ * progress, bubbles). Positions, states and facing come from sceneAt; the
+ * walk cycle runs on scene time, so pausing and scrubbing stay exact. The only
+ * real-time effect is decorative steam.
  */
 export class FloorScene extends Phaser.Scene {
-  /** Floor layer (staff area, wall, rope, slots), redrawn every frame. */
+  /** Static floor (built once from the zones, slots and lanes). */
+  private built = false;
+  /** Per-frame overlays: wall, progress, outlines, tag plates, bubbles. */
   private g!: Phaser.GameObjects.Graphics;
-  /** Customer and staff bodies, drawn above the floor layer. */
-  private top!: Phaser.GameObjects.Graphics;
-  /** Text objects are pooled by key and reused across frames. */
+  /** Pools reused across frames, keyed by id. */
+  private sprites = new Map<string, Phaser.GameObjects.Sprite>();
   private texts = new Map<string, Phaser.GameObjects.Text>();
-  /** Icon images, pooled by key like the texts. */
-  private icons = new Map<string, Phaser.GameObjects.Image>();
   /** Keys drawn this frame; the rest are hidden. */
   private used = new Set<string>();
 
@@ -60,22 +69,152 @@ export class FloorScene extends Phaser.Scene {
     super('floor');
   }
 
-  /** Loads the role and person icons (rendered at 2× for crisp scaling). */
+  /** Loads the three sprite sheets as 16 × 16 frames. */
   preload() {
-    for (const icon of iconSources({
-      onAccent: css(c.onAccent),
-      secondary: css(c.textSecondary),
-      muted: css(c.textMuted),
-    }))
-      this.load.svg(icon.key, icon.uri, {
-        width: icon.size * 2,
-        height: icon.size * 2,
+    for (const sheet of Object.values(SHEETS))
+      this.load.spritesheet(sheet.key, sheet.url, {
+        frameWidth: 16,
+        frameHeight: 16,
+        spacing: sheet.spacing,
       });
   }
 
   create() {
-    this.g = this.add.graphics().setDepth(0);
-    this.top = this.add.graphics().setDepth(5);
+    this.g = this.add.graphics().setDepth(900);
+  }
+
+  /** Floor, walls, counters and decor: drawn once, they never change during a run. */
+  private buildStatic(scene: FloorState) {
+    this.built = true;
+    const W = GRID.offsetX * 2 + GRID.width * GRID.unit;
+    const { lanes } = scene;
+    // Customer area: stone tiles everywhere first.
+    this.add
+      // Taller than the canvas so a board that grows later (extra waiting rows) stays tiled.
+      .tileSprite(0, 0, W, 2000, SHEETS.urban.key, URBAN.stone)
+      .setOrigin(0)
+      .setTileScale(SCALE)
+      .setDepth(0);
+    const staff = scene.zones.find((z) => z.kind === 'staff');
+    const back = scene.slots.filter(
+      (s) => s.type === 'bar' || s.type === 'clean',
+    );
+    const front = scene.slots.filter(
+      (s) => s.type === 'register' || s.type === 'pickup',
+    );
+    if (staff) {
+      const x = px(staff.x),
+        y = py(staff.y);
+      const w = staff.w * GRID.unit,
+        h = staff.h * GRID.unit;
+      const wallBottom = back.length ? py(back[0].y) - HALF : y + TILE_PX;
+      const floor = this.add.graphics().setDepth(1);
+      // Wood planks with staggered seams.
+      floor
+        .fillStyle(WOOD.base, 1)
+        .fillRect(x, wallBottom, w, y + h - wallBottom);
+      for (let top = wallBottom, i = 0; top < y + h; top += WOOD.plank, i++) {
+        floor.fillStyle(WOOD.light, 1).fillRect(x, top, w, 2);
+        floor.fillStyle(WOOD.gap, 1).fillRect(x, top + WOOD.plank - 2, w, 2);
+        for (let sx = x + (i % 3) * 32; sx < x + w; sx += 96)
+          floor.fillRect(sx, top, 2, WOOD.plank - 2);
+      }
+      // Back wall with skirting; a plant in each corner (Figma: columns 0 and 16).
+      floor.fillStyle(WALL.fill, 1).fillRect(x, y, w, wallBottom - y);
+      floor.fillStyle(WALL.skirting, 1).fillRect(x, wallBottom - 6, w, 6);
+      this.tile(FURNITURE.plantA, x + HALF, wallBottom + HALF, 2);
+      this.tile(FURNITURE.plantB, x + w - HALF, wallBottom + HALF, 2);
+      // Front counter spans the staff area minus one tile each side (columns 1–15).
+      if (front.length)
+        this.counterRun(
+          FURNITURE.counter,
+          x + TILE_PX + HALF,
+          x + w - TILE_PX - HALF,
+          py(front[0].y),
+        );
+    }
+    // Back counters: the bar run (one tile left of Bar 1 to three right of the last
+    // bar, columns 4–10) and a short run around the sink (columns 13–15).
+    const bars = back.filter((s) => s.type === 'bar');
+    if (bars.length) {
+      const xs = bars.map((s) => px(s.x));
+      this.counterRun(
+        FURNITURE.counterBack,
+        Math.min(...xs) - TILE_PX,
+        Math.max(...xs) + 3 * TILE_PX,
+        py(bars[0].y),
+      );
+    }
+    for (const sink of back.filter((s) => s.type === 'clean'))
+      this.counterRun(
+        FURNITURE.counterBack,
+        px(sink.x) - TILE_PX,
+        px(sink.x) + TILE_PX,
+        py(sink.y),
+      );
+    // Doors in the front wall: open glass doors with IN / OUT signs.
+    const doorY = py(lanes.wallY) - HALF;
+    const signs = this.add.graphics().setDepth(4);
+    for (const [span, label] of [
+      [lanes.doorIn, 'IN'],
+      [lanes.doorOut, 'OUT'],
+    ] as const) {
+      const dx = px((span[0] + span[1]) / 2);
+      this.add
+        .image(dx, doorY, SHEETS.urban.key, URBAN.doorOpen)
+        .setScale(SCALE)
+        .setDepth(3);
+      const w = label.length * 7 + 10;
+      signs.fillStyle(c.good, 1).fillRect(dx - w / 2, doorY - HALF - 14, w, 12);
+      this.add
+        .text(dx, doorY - HALF - 8, label, {
+          fontFamily: FONT,
+          fontSize: '8px',
+          fontStyle: '700',
+          color: css(c.onAccent),
+          resolution: 2,
+        })
+        .setOrigin(0.5)
+        .setDepth(5);
+    }
+  }
+
+  /** A row of counter tiles from x1 to x2 (inclusive) at height y. */
+  private counterRun(frame: number, x1: number, x2: number, y: number) {
+    for (let x = x1; x <= x2 + 0.5; x += TILE_PX) this.tile(frame, x, y, 2);
+  }
+
+  /** Adds a static 3× furniture tile centred at (x, y). */
+  private tile(frame: number, x: number, y: number, depth: number) {
+    return this.add
+      .image(x, y, SHEETS.indoors.key, frame)
+      .setScale(SCALE)
+      .setDepth(depth);
+  }
+
+  /** Draws (or reuses) a pooled sprite identified by key. */
+  private sprite(
+    key: string,
+    texture: string,
+    frame: number,
+    x: number,
+    y: number,
+    depth: number,
+    originY = 0.5,
+  ) {
+    let s = this.sprites.get(key);
+    if (!s) {
+      s = this.add.sprite(0, 0, texture, frame).setScale(SCALE);
+      this.sprites.set(key, s);
+    }
+    s.setTexture(texture, frame)
+      .setOrigin(0.5, originY)
+      .setPosition(x, y)
+      .setDepth(depth)
+      .setAlpha(1)
+      .setVisible(true);
+    this.used.add(key);
+    return s;
   }
 
   /** Draws (or reuses) a text label identified by key. */
@@ -84,360 +223,279 @@ export class FloorScene extends Phaser.Scene {
     value: string,
     x: number,
     y: number,
-    opts: {
-      size: number;
-      color: number;
-      weight?: string;
-      originX?: number;
-      depth?: number;
-      alpha?: number;
-    },
+    size: number,
+    color: number,
+    depth = 950,
   ) {
     let t = this.texts.get(key);
     if (!t) {
       t = this.add.text(0, 0, '', {
         fontFamily: FONT,
-        fontSize: `${opts.size}px`,
-        fontStyle: opts.weight ?? '400',
-        color: css(opts.color),
+        fontSize: `${size}px`,
+        fontStyle: '600',
         resolution: 2,
       });
       this.texts.set(key, t);
     }
     if (t.text !== value) t.setText(value);
-    t.setOrigin(opts.originX ?? 0.5, 0.5)
+    t.setOrigin(0.5, 0.5)
       .setPosition(x, y)
-      .setColor(css(opts.color))
-      .setDepth(opts.depth ?? 10)
-      .setAlpha(opts.alpha ?? 1)
-      .setVisible(true);
-    this.used.add(key);
-  }
-
-  /** Draws (or reuses) an icon image identified by key. */
-  private icon(
-    key: string,
-    texture: string,
-    x: number,
-    y: number,
-    size: number,
-    depth: number,
-    alpha = 1,
-  ) {
-    let img = this.icons.get(key);
-    if (!img) {
-      img = this.add.image(0, 0, texture);
-      this.icons.set(key, img);
-    }
-    if (img.texture.key !== texture) img.setTexture(texture);
-    img
-      .setPosition(x, y)
-      .setDisplaySize(size, size)
+      .setColor(css(color))
       .setDepth(depth)
-      .setAlpha(alpha)
       .setVisible(true);
     this.used.add(key);
+    return t;
   }
 
-  /** Phaser calls this every frame: floor, slots, customers, staff, highlights. */
+  /** Phaser calls this every frame. */
   update(time: number) {
     const { scene, highlight, reducedMotion } = this.read();
     this.g.clear();
-    this.top.clear();
     this.used.clear();
     if (!scene) return this.hideUnused();
-    // Decorative pulse for waiting staff; off when the user prefers reduced motion.
-    const pulse = reducedMotion ? 1 : 0.55 + 0.45 * Math.sin(time / 220);
-
-    this.drawStaffArea(scene);
-    this.drawLanes(scene.lanes, scene.queueFolded);
+    if (!this.built) this.buildStatic(scene);
+    this.drawWallAndRope(scene);
     for (const s of scene.slots)
-      this.drawSlot(s, highlight.resourceId === s.id);
-    // Standing customers first, walking ones on top so they are never hidden.
-    const customers = [...scene.customers].sort(
-      (a, b) => Number(a.walking) - Number(b.walking),
-    );
-    customers.forEach((cu, i) =>
-      this.drawCustomer(cu, highlight.jobId === cu.id, 6 + i * 0.001),
-    );
+      this.drawSlot(s, highlight.resourceId === s.id, time, reducedMotion);
     for (const a of scene.agents)
-      this.drawAgent(a, highlight.agentId === a.id, pulse);
+      this.drawAgent(a, highlight.agentId === a.id, scene.t);
+    for (const cu of scene.customers)
+      this.drawCustomer(cu, highlight.jobId === cu.id, scene.t);
     this.hideUnused();
   }
 
-  /** Staff-only area with its caption and the role group labels (no customer boxes). */
-  private drawStaffArea(scene: FloorState) {
-    const staff = scene.zones.find((z) => z.kind === 'staff');
-    if (staff) {
-      this.g.fillStyle(c.surface, 1);
-      this.g.fillRoundedRect(
-        px(staff.x),
-        py(staff.y),
-        staff.w * GRID.unit,
-        staff.h * GRID.unit,
-        8,
-      );
-      this.g.lineStyle(1, c.borderSubtle, 1);
-      this.g.strokeRoundedRect(
-        px(staff.x),
-        py(staff.y),
-        staff.w * GRID.unit,
-        staff.h * GRID.unit,
-        8,
-      );
-      this.text('zone:staff', 'STAFF ONLY', px(staff.x) + 8, py(staff.y) + 10, {
-        size: 9,
-        color: c.textMuted,
-        weight: '600',
-        originX: 0,
-      });
-    }
-    for (const [label, x, y, role] of ROLE_LABELS) {
-      this.g.fillStyle(c.role[role], 1);
-      this.g.fillCircle(px(x), py(y), 3.5);
-      this.text(`role:${label}`, label, px(x) + 9, py(y), {
-        size: 10,
-        color: c.textSecondary,
-        weight: '600',
-        originX: 0,
-      });
-    }
-  }
-
-  /** Front wall with door gaps and the queue rope (long line only). Lanes and spots stay invisible. */
-  private drawLanes(l: Lanes, folded: boolean) {
-    const g = this.g;
-    // Rope with stanchions between the two queue rows, only while the line is long.
-    if (folded) {
-      g.lineStyle(2, c.borderStrong, 1);
-      g.lineBetween(
-        px(l.rope[0].x),
-        py(l.rope[0].y),
-        px(l.rope[1].x),
-        py(l.rope[1].y),
-      );
-      g.fillStyle(c.textSecondary, 1);
-      for (let k = 0; k <= 4; k++) {
-        const x = l.rope[0].x + ((l.rope[1].x - l.rope[0].x) * k) / 4;
-        g.fillCircle(px(x), py(l.rope[0].y), 3.5);
-      }
-    }
-    // Front wall with the two door openings and arrows (in at left, out at right).
-    const wall = py(l.wallY);
+  /** Front wall with door gaps; queue rope only while the line is folded. */
+  private drawWallAndRope(scene: FloorState) {
+    const { lanes } = scene;
+    const wall = py(lanes.wallY);
     const right = GRID.offsetX * 2 + GRID.width * GRID.unit;
-    g.lineStyle(2, c.borderStrong, 1);
-    g.lineBetween(0, wall, px(l.doorIn[0]), wall);
-    g.lineBetween(px(l.doorIn[1]), wall, px(l.doorOut[0]), wall);
-    g.lineBetween(px(l.doorOut[1]), wall, right, wall);
-    g.fillStyle(c.textMuted, 1);
-    const inX = px((l.doorIn[0] + l.doorIn[1]) / 2);
-    const outX = px((l.doorOut[0] + l.doorOut[1]) / 2);
-    g.fillTriangle(inX, wall - 3, inX - 5, wall + 7, inX + 5, wall + 7);
-    g.fillTriangle(outX, wall + 8, outX - 5, wall - 2, outX + 5, wall - 2);
+    this.g.fillStyle(c.borderStrong, 1);
+    this.g.fillRect(0, wall - 2, px(lanes.doorIn[0]), 4);
+    this.g.fillRect(
+      px(lanes.doorIn[1]),
+      wall - 2,
+      px(lanes.doorOut[0]) - px(lanes.doorIn[1]),
+      4,
+    );
+    this.g.fillRect(
+      px(lanes.doorOut[1]),
+      wall - 2,
+      right - px(lanes.doorOut[1]),
+      4,
+    );
+    if (!scene.queueFolded) return;
+    const [a, b] = lanes.rope;
+    const from = px(a.x),
+      to = px(b.x);
+    const count = Math.max(2, Math.round((to - from) / TILE_PX) + 1);
+    for (let i = 0; i < count; i++) {
+      const frame =
+        i === 0
+          ? URBAN.ropeLeft
+          : i === count - 1
+            ? URBAN.ropeRight
+            : URBAN.ropeMid;
+      this.sprite(
+        `rope:${i}`,
+        SHEETS.urban.key,
+        frame,
+        from + (i * (to - from)) / (count - 1),
+        py(a.y),
+        3 + a.y,
+      );
+    }
   }
 
-  /** Shop/Slot: fill and stroke by state, label + sub line, progress bar when busy. */
-  private drawSlot(s: SlotView, lit: boolean) {
+  /** A slot as furniture: name plate, progress bar when busy, dashed outline when claimed, steam. */
+  private drawSlot(
+    s: SlotView,
+    lit: boolean,
+    time: number,
+    reducedMotion: boolean,
+  ) {
+    const x = px(s.x),
+      y = py(s.y);
     const g = this.g;
-    const x = px(s.x) - SLOT.w / 2;
-    const y = py(s.y) - SLOT.h / 2;
-    g.fillStyle(c.stationFill, 1);
-    g.fillRoundedRect(x, y, SLOT.w, SLOT.h, SLOT.r);
-    if (s.state === 'busy') {
-      g.fillStyle(c.stationFillBusy, 0.14);
-      g.fillRoundedRect(x, y, SLOT.w, SLOT.h, SLOT.r);
-    }
-    if (s.state === 'claimed')
-      this.dashedRect(x, y, SLOT.w, SLOT.h, c.stationStrokeClaimed, 1.5, 4, 3);
-    else {
-      g.lineStyle(1, s.state === 'busy' ? c.textSecondary : c.stationStroke, 1);
-      g.strokeRoundedRect(x, y, SLOT.w, SLOT.h, SLOT.r);
-    }
-    if (lit) {
-      g.lineStyle(2.5, c.focus, 1);
-      g.strokeRoundedRect(x - 3, y - 3, SLOT.w + 6, SLOT.h + 6, SLOT.r + 2);
-    }
-    const sub =
-      s.state === 'busy'
-        ? (s.taskLabel ?? 'busy')
-        : s.state === 'claimed'
-          ? 'claimed'
-          : 'idle';
-    const busyShift = s.state === 'busy' ? -3 : 0;
-    this.text(`slot:${s.id}`, s.label, px(s.x), py(s.y) - 7 + busyShift, {
-      size: 12,
-      color: c.textPrimary,
-      weight: '600',
-    });
-    this.text(`slotSub:${s.id}`, sub, px(s.x), py(s.y) + 8 + busyShift, {
-      size: 10,
-      color: c.textSecondary,
-    });
-    if (s.state === 'busy') {
-      const bx = px(s.x) - SLOT.bar / 2;
-      const by = y + SLOT.h - 8;
-      g.fillStyle(c.sunken, 1);
-      g.fillRect(bx, by, SLOT.bar, 3);
-      if (s.progress !== null) {
-        g.fillStyle(c.progress, 1);
-        g.fillRect(bx, by, SLOT.bar * s.progress, 3);
-      }
-    }
-  }
-
-  /** Shop/CustomerToken: raised disc + person icon, ring by stage, id below. */
-  private drawCustomer(cu: CustomerView, lit: boolean, depth: number) {
-    const g = this.top;
-    const x = px(cu.x);
-    const y = py(cu.y);
-    const leaving = cu.stage === 'leaving';
-    const alpha = leaving ? 0.45 : 1;
-    g.fillStyle(c.raised, alpha);
-    g.fillCircle(x, y, CUSTOMER.r);
-    if (lit) {
-      g.lineStyle(2.5, c.focus, 1);
-      g.strokeCircle(x, y, CUSTOMER.r + 3);
-    }
-    if (cu.late && !leaving) {
-      g.lineStyle(2, c.critical, 1);
-      g.strokeCircle(x, y, CUSTOMER.r);
-      g.fillStyle(c.critical, 1);
-      g.fillCircle(x + CUSTOMER.r - 2, y - CUSTOMER.r + 2, CUSTOMER.badge);
-    } else if (cu.stage === 'waiting') {
-      this.dashedCircle(this.top, x, y, CUSTOMER.r, c.textMuted, 1, 10);
-    } else {
-      const [color, width] =
-        cu.stage === 'ordering'
-          ? [c.textPrimary, 1.5]
-          : cu.stage === 'ready'
-            ? [c.good, 1.5]
-            : [c.textMuted, 1];
-      g.lineStyle(width, color, alpha);
-      g.strokeCircle(x, y, CUSTOMER.r);
-    }
-    this.icon(
-      `cust:${cu.id}`,
-      leaving ? iconKey.personMuted : iconKey.person,
+    this.sprite(
+      `slot:${s.id}`,
+      SHEETS.indoors.key,
+      SLOT_FRAME[s.type],
       x,
       y,
-      CUSTOMER.icon,
-      depth + 0.5,
-      alpha,
+      3 + s.y,
     );
-    this.text(`custId:${cu.id}`, cu.id, x, y + CUSTOMER.r + 8, {
-      size: 10,
-      color: c.textMuted,
-      depth: depth + 0.5,
-      alpha,
-    });
-  }
-
-  /** Shop/StaffToken: state ring, role-coloured body, role icon, name below. */
-  private drawAgent(a: AgentView, lit: boolean, pulse: number) {
-    const g = this.top;
-    const x = px(a.x);
-    const y = py(a.y);
-    const color = c.role[a.role];
-    if (a.state === 'idle') {
-      g.lineStyle(1, c.textMuted, 0.6);
-      g.strokeCircle(x, y, STAFF.ring);
-    } else if (a.state === 'moving') {
-      this.dashedCircle(g, x, y, STAFF.ring, color, 1.5, 16);
-    } else if (a.state === 'waiting') {
-      g.lineStyle(2.5, c.warning, pulse);
-      g.strokeCircle(x, y, STAFF.ring);
-    } else {
-      // Working: progress pie behind the body reads as a ring.
-      const k = a.progress ?? 0.65;
-      g.fillStyle(c.progress, 1);
-      g.slice(
-        x,
-        y,
-        STAFF.ring,
-        -Math.PI / 2,
-        -Math.PI / 2 + Math.max(0.05, k) * Math.PI * 2,
-        false,
-      );
-      g.fillPath();
-    }
-    g.fillStyle(color, 1);
-    g.fillCircle(x, y, STAFF.body);
-    g.lineStyle(2, c.page, 1);
-    g.strokeCircle(x, y, STAFF.body);
-    if (lit) {
-      g.lineStyle(2.5, c.focus, 1);
-      g.strokeCircle(x, y, STAFF.ring + 4);
-    }
-    this.icon(`agent:${a.id}`, iconKey.role(a.role), x, y, STAFF.icon, 8);
+    // Name plate: bottom edge on the front counter; top edge on the back row,
+    // where staff tags sit right below the machines (as in the Figma draft).
+    const backRow = s.type === 'bar' || s.type === 'clean';
+    const plateTop = backRow ? y - HALF + 2 : y + HALF - 13;
+    g.fillStyle(c.page, 0.7).fillRect(x - HALF + 3, plateTop, TILE_PX - 6, 11);
     this.text(
-      `agentName:${a.id}`,
-      a.helping ? `${a.name} · helping` : a.name,
+      `plate:${s.id}`,
+      s.label.replace(/^\w+/, (w) => SHORT[s.type] ?? w),
       x,
-      y + STAFF.ring + 8,
-      { size: 10, color: c.textSecondary, depth: 8 },
+      plateTop + 5.5,
+      8,
+      c.textPrimary,
     );
+    if (s.state === 'busy') {
+      g.fillStyle(c.sunken, 1).fillRect(
+        x - HALF + 6,
+        y - HALF - 7,
+        TILE_PX - 12,
+        5,
+      );
+      g.fillStyle(c.progress, 1).fillRect(
+        x - HALF + 6,
+        y - HALF - 7,
+        (TILE_PX - 12) * (s.progress ?? 0),
+        5,
+      );
+      // Decorative steam rising from working espresso machines.
+      if (s.type === 'bar' && !reducedMotion)
+        for (let k = 0; k < 3; k++) {
+          const phase = (time / 900 + k / 3) % 1;
+          g.fillStyle(c.textPrimary, 0.7 * (1 - phase));
+          g.fillRect(
+            x - 6 + k * 5 + Math.sin(phase * 6 + k) * 2,
+            y - HALF - 12 - phase * 18,
+            4,
+            4,
+          );
+        }
+    }
+    if (s.state === 'claimed')
+      this.dashedBox(
+        x - HALF,
+        y - HALF,
+        TILE_PX,
+        TILE_PX,
+        c.stationStrokeClaimed,
+      );
+    if (lit)
+      g.lineStyle(2, c.focus, 1).strokeRect(
+        x - HALF - 3,
+        y - HALF - 3,
+        TILE_PX + 6,
+        TILE_PX + 6,
+      );
   }
 
-  /** Dashed rectangle outline (square corners; close enough at this size). */
-  private dashedRect(
+  /** A staff member: role sprite facing its direction, walk cycle while moving, role tag. */
+  private drawAgent(a: AgentView, lit: boolean, t: number) {
+    const x = px(a.x),
+      feet = py(a.y) + FEET;
+    const anim = a.state === 'moving' ? WALK_CYCLE[Math.floor(t * 6) % 4] : 0;
+    this.sprite(
+      `agent:${a.id}`,
+      SHEETS.urban.key,
+      staffFrame(a.role, a.facing, anim),
+      x,
+      feet,
+      10 + a.y,
+      1,
+    );
+    const top = feet - TILE_PX + 4;
+    // Tag above the head: dark plate, role colour square, name.
+    const label = a.helping ? `${a.name} · helping` : a.name;
+    const w = label.length * 5.2 + 18;
+    this.g.fillStyle(c.page, 0.75).fillRect(x - w / 2, top - 14, w, 12);
+    this.g.fillStyle(c.role[a.role], 1).fillRect(x - w / 2 + 3, top - 11, 6, 6);
+    this.text(`agentName:${a.id}`, label, x + 5, top - 8, 8, c.textPrimary);
+    if (a.state === 'waiting')
+      this.bubble(
+        `agentWait:${a.id}`,
+        '…',
+        x + 22,
+        top - 2,
+        c.warning,
+        c.onAccent,
+      );
+    if (lit)
+      this.g
+        .lineStyle(2, c.focus, 1)
+        .strokeRect(x - HALF + 4, top - 2, TILE_PX - 8, TILE_PX);
+  }
+
+  /** A customer: their guest kind (a–j) facing its direction, walk cycle, id, status bubbles. */
+  private drawCustomer(cu: CustomerView, lit: boolean, t: number) {
+    const x = px(cu.x),
+      feet = py(cu.y) + FEET;
+    const anim = cu.walking ? WALK_CYCLE[Math.floor(t * 6) % 4] : 0;
+    // Walkers sort just above standing people at the same row.
+    const depth = 10 + cu.y + (cu.walking ? 0.05 : 0);
+    this.sprite(
+      `cust:${cu.id}`,
+      SHEETS.guests.key,
+      guestFrame(cu.guest, cu.facing, anim),
+      x,
+      feet,
+      depth,
+      1,
+    ).setAlpha(cu.stage === 'leaving' ? 0.75 : 1);
+    // Id on a dark plate so it reads on the light stone floor.
+    const idW = cu.id.length * 5 + 6;
+    this.g.fillStyle(c.page, 0.65).fillRect(x - idW / 2, feet + 1, idW, 10);
+    this.text(
+      `custId:${cu.id}`,
+      cu.id,
+      x,
+      feet + 6,
+      8,
+      cu.late ? c.critical : c.textPrimary,
+    );
+    const top = feet - TILE_PX + 6;
+    if (cu.late && cu.stage !== 'leaving')
+      this.bubble(`late:${cu.id}`, '!', x, top - 4, c.critical, c.textPrimary);
+    else if (cu.stage === 'ready')
+      this.bubble(
+        `ready:${cu.id}`,
+        'Ready!',
+        // Beside the body, clear of the pickup counter's name plate.
+        x + 30,
+        feet - 14,
+        c.good,
+        c.onAccent,
+      );
+    if (lit)
+      this.g
+        .lineStyle(2, c.focus, 1)
+        .strokeRect(x - HALF + 6, top - 2, TILE_PX - 12, TILE_PX - 4);
+  }
+
+  /** A small speech bubble with a tail, centred above (x, y). */
+  private bubble(
+    key: string,
+    label: string,
     x: number,
     y: number,
-    w: number,
-    h: number,
+    fill: number,
     color: number,
-    width: number,
-    dash: number,
-    gap: number,
   ) {
-    const corners = [
-      { x, y },
-      { x: x + w, y },
-      { x: x + w, y: y + h },
-      { x, y: y + h },
-      { x, y },
-    ];
+    const w = label.length * 6 + 10;
+    this.g.fillStyle(fill, 1).fillRect(x - w / 2, y - 14, w, 13);
+    this.g.fillRect(x - 2, y - 1, 4, 3);
+    this.text(key, label, x, y - 7.5, 8, color);
+  }
+
+  /** Dashed square outline (claimed slot). */
+  private dashedBox(x: number, y: number, w: number, h: number, color: number) {
     const g = this.g;
-    g.lineStyle(width, color, 1);
-    for (let i = 1; i < corners.length; i++) {
-      const a = corners[i - 1],
-        b = corners[i];
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
-      for (let d = 0; d < len; d += dash + gap) {
-        const e = Math.min(len, d + dash);
-        g.lineBetween(
-          a.x + ((b.x - a.x) * d) / len,
-          a.y + ((b.y - a.y) * d) / len,
-          a.x + ((b.x - a.x) * e) / len,
-          a.y + ((b.y - a.y) * e) / len,
-        );
-      }
+    g.fillStyle(color, 1);
+    for (let d = 0; d < w; d += 7) {
+      g.fillRect(x + d, y, Math.min(4, w - d), 2);
+      g.fillRect(x + d, y + h - 2, Math.min(4, w - d), 2);
+    }
+    for (let d = 0; d < h; d += 7) {
+      g.fillRect(x, y + d, 2, Math.min(4, h - d));
+      g.fillRect(x + w - 2, y + d, 2, Math.min(4, h - d));
     }
   }
 
-  /** Dashed circle as alternating arcs. */
-  private dashedCircle(
-    g: Phaser.GameObjects.Graphics,
-    x: number,
-    y: number,
-    r: number,
-    color: number,
-    width: number,
-    segments: number,
-  ) {
-    g.lineStyle(width, color, 1);
-    const step = (Math.PI * 2) / segments;
-    for (let i = 0; i < segments; i++) {
-      g.beginPath();
-      g.arc(x, y, r, i * step, i * step + step * 0.55);
-      g.strokePath();
-    }
-  }
-
-  /** Hides labels and icons that were not drawn this frame (customers who left, etc.). */
+  /** Hides pooled sprites and labels not drawn this frame (customers who left, rope, etc.). */
   private hideUnused() {
+    for (const [key, s] of this.sprites)
+      if (!this.used.has(key)) s.setVisible(false);
     for (const [key, t] of this.texts)
       if (!this.used.has(key)) t.setVisible(false);
-    for (const [key, img] of this.icons)
-      if (!this.used.has(key)) img.setVisible(false);
   }
 }

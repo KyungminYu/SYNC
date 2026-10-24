@@ -10,3 +10,5 @@ coverage/
 *.png
 # macOS Finder metadata
 .DS_Store
+# Dashboard sprite sheets are part of the app
+!apps/web/public/assets/**/*.png

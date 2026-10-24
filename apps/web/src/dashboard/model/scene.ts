@@ -35,6 +35,40 @@ export interface SlotView {
   /** Sub line while busy, e.g. "c26 · make" (order id · kind of work). */
   taskLabel?: string;
 }
+/** Customer looks: 10 guest kinds, rows a–j of guests.png. */
+export const GUEST_KINDS = [
+  'a',
+  'b',
+  'c',
+  'd',
+  'e',
+  'f',
+  'g',
+  'h',
+  'i',
+  'j',
+] as const;
+export type GuestKind = (typeof GUEST_KINDS)[number];
+
+/**
+ * Picks a guest kind for a customer with a seeded random draw: the same run
+ * seed and customer id always give the same kind, a different seed reshuffles.
+ */
+export function guestKind(seed: number, customerId: string): GuestKind {
+  // Hash seed + id into 32 bits, then one mulberry32 step for a uniform draw.
+  let h = (seed ^ 0x9e3779b9) >>> 0;
+  for (const ch of customerId)
+    h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  h = (h + 0x6d2b79f5) >>> 0;
+  let r = Math.imul(h ^ (h >>> 15), h | 1);
+  r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+  const u = ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  return GUEST_KINDS[Math.floor(u * GUEST_KINDS.length)];
+}
+
+/** Which way a person faces; picks the sprite direction. */
+export type Facing = 'left' | 'down' | 'up' | 'right';
+
 /** One staff member as drawn. `helping` = working outside the primary role. */
 export interface AgentView {
   id: string;
@@ -44,8 +78,10 @@ export interface AgentView {
   y: number;
   state: 'idle' | 'moving' | 'waiting' | 'working';
   helping: boolean;
-  /** 0–1 progress of the task being worked on (drawn as the ring); null otherwise. */
+  /** 0–1 progress of the task being worked on; null otherwise. */
   progress: number | null;
+  /** Walking direction, or the way they face while standing. */
+  facing: Facing;
 }
 /** Where a customer is in the flow: line → ordering → waiting → ready → leaving. */
 export type CustomerStage =
@@ -60,6 +96,10 @@ export interface CustomerView {
   y: number;
   /** True while walking between places; drawn above standing customers. */
   walking: boolean;
+  /** Walking direction, or the way they face while standing. */
+  facing: Facing;
+  /** Which of the 10 guest looks (a–j) this customer has. */
+  guest: GuestKind;
 }
 /** Full floor state at one instant; also feeds the shop card's Done / Late. */
 export interface Scene {
@@ -107,6 +147,8 @@ export function sceneAt(
   data: RunData,
   t: number,
   lanes: Lanes = buildLanes(data.layout, peakWaiting(data)),
+  /** Internal: false when computing the previous instant for facing. */
+  withFacing = true,
 ): Scene {
   const { layout } = data;
   const resources = new Map(layout.resources.map((r) => [r.id, r]));
@@ -299,6 +341,7 @@ export function sceneAt(
             : 'idle',
       helping: type !== undefined && !a.primaryTypes.includes(type),
       progress: s.working ? (slot?.progress ?? null) : null,
+      facing: 'down' as Facing,
     };
   });
 
@@ -487,8 +530,18 @@ export function sceneAt(
       x: p.x,
       y: p.y,
       walking: p.walking,
+      facing: 'up' as Facing,
+      guest: guestKind(data.run.seed, id),
     });
   });
+
+  if (withFacing)
+    applyFacing(
+      agentViews,
+      customerViews,
+      sceneAt(data, t - 0.12, lanes, false),
+      lanes,
+    );
 
   return {
     t,
@@ -519,4 +572,52 @@ export function peakWaiting(data: RunData) {
     peak = Math.max(peak, now);
   }
   return peak;
+}
+
+/** Direction of travel between two positions, or null when standing still. */
+function travelDirection(from: Point, to: Point): Facing | null {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) + Math.abs(dy) < 1e-4) return null;
+  return Math.abs(dx) >= Math.abs(dy)
+    ? dx < 0
+      ? 'left'
+      : 'right'
+    : dy < 0
+      ? 'up'
+      : 'down';
+}
+
+/**
+ * Sets each person's facing: the way they moved since a moment ago, or a
+ * sensible standing direction — staff face their workstation (machines at the
+ * back, customers at the counter), people in line face the head of the line,
+ * everyone else faces the counters, and leaving customers face the door.
+ */
+function applyFacing(
+  agents: AgentView[],
+  customers: CustomerView[],
+  prev: Scene,
+  lanes: Lanes,
+) {
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+  for (const a of agents) {
+    const before = prev.agents.find((p) => p.id === a.id);
+    a.facing =
+      (before && travelDirection(before, a)) ??
+      (a.y < lanes.staffAisleY ? 'up' : 'down');
+  }
+  for (const c of customers) {
+    const before = prev.customers.find((p) => p.id === c.id);
+    const moved = before && travelDirection(before, c);
+    if (moved) c.facing = moved;
+    else if (c.stage === 'leaving') c.facing = 'down';
+    else if (c.stage === 'line')
+      c.facing = near(c.y, lanes.topRowY)
+        ? 'left'
+        : near(c.y, lanes.bottomRowY)
+          ? 'right'
+          : 'up';
+    else c.facing = 'up';
+  }
 }

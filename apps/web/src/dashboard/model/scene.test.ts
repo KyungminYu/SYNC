@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { simulate } from '../../sync/mock/scenario';
 import { normalizeRun } from './normalize';
-import { sceneAt } from './scene';
+import { GUEST_KINDS, guestKind, sceneAt } from './scene';
 import { decisionsAt } from './decisions';
 import { buildLanes } from './lanes';
 import type { SyncEvent } from '../../sync/contract';
@@ -312,5 +312,45 @@ describe('order line timing, folding and waiting capacity', () => {
     );
     for (const s of fifteen.waitingSpots)
       expect(s.aisleY === undefined).toBe(s.y === rows[0]);
+  });
+});
+
+describe('pixel-art presentation data', () => {
+  it('assigns guest kinds a–j with a seeded random draw', () => {
+    const ids = Array.from({ length: 200 }, (_, i) => `c${i + 1}`);
+    const kinds = ids.map((id) => guestKind(5, id));
+    // Deterministic for the same seed, reshuffled by another seed, and all 10 kinds appear.
+    expect(ids.map((id) => guestKind(5, id))).toEqual(kinds);
+    expect(ids.map((id) => guestKind(6, id))).not.toEqual(kinds);
+    expect(new Set(kinds)).toEqual(new Set(GUEST_KINDS));
+    const s = sceneAt(run, 120);
+    for (const c of s.customers)
+      expect(c.guest).toBe(guestKind(run.run.seed, c.id));
+  });
+
+  it('faces people the way they walk and sensibly when standing', () => {
+    for (let t = 1; t < 300; t += 0.5) {
+      const s = sceneAt(run, t);
+      const before = sceneAt(run, t - 0.3);
+      for (const c of s.customers) {
+        // Only people who have been standing still for a moment use the standing direction.
+        const was = before.customers.find((p) => p.id === c.id);
+        if (!was || was.x !== c.x || was.y !== c.y) continue;
+        if (c.stage === 'leaving') expect(c.facing).toBe('down');
+        if (c.stage === 'waiting') expect(c.facing).toBe('up');
+      }
+    }
+    // A customer walking from the register to the waiting area first steps down, then right.
+    const job = run.jobs[3];
+    const done = run.events.find(
+      (e) => e.type === 'task.finished' && e.taskId === `${job.id}.order`,
+    )!;
+    expect(
+      sceneAt(run, done.t + 0.05).customers.find((c) => c.id === job.id)
+        ?.facing,
+    ).toBe('down');
+    expect(
+      sceneAt(run, done.t + 0.6).customers.find((c) => c.id === job.id)?.facing,
+    ).toBe('right');
   });
 });

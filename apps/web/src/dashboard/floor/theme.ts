@@ -36,13 +36,13 @@ export const floorTheme = {
 /** 0xRRGGBB → "#rrggbb" for Phaser text styles. */
 export const css = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
 
-/** Grid → pixel mapping shared with the Figma layout draft. */
+/** Grid → pixel mapping: one grid unit is one 48 px tile; 17 × 10 tiles like the Figma pixel draft. */
 export const GRID = {
-  unit: 56,
-  offsetX: 22,
-  offsetY: 20,
-  width: 12.6,
-  height: 7.75,
+  unit: 48,
+  offsetX: 0,
+  offsetY: 0,
+  width: 17,
+  height: 10,
 };
 /** Canvas size in pixels; Phaser scales it to fit the card. */
 export const FLOOR_PX = {
