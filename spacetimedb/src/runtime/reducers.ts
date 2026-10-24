@@ -151,6 +151,9 @@ export const set_policy = db.reducer(
       'maxAgeTicks',
       'candidatesPerWorker',
       'maxBranches',
+      'deadlineWeight',
+      'executionWeight',
+      'coordinationWeight',
     ];
     if (Object.keys(patch).some((k) => !allowed.includes(k)))
       throw new Error('UNKNOWN_POLICY_FIELD');

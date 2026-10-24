@@ -725,8 +725,37 @@ test('external task priorities apply only to tasks that have not started', () =>
   assert.equal(capture.priority, 1, 'an assigned task keeps its priority');
   assert.equal(payment.priority, 7);
   assert.ok(s.run.version > version);
-  assert.throws(() => setTaskPriorities(s, OWNER, [payment.id], [101]), /INVALID_PRIORITY/);
+  assert.throws(
+    () => setTaskPriorities(s, OWNER, [payment.id], [101]),
+    /INVALID_PRIORITY/,
+  );
   assert.throws(() => setTaskPriorities(s, OWNER, [999n], [1]), /UNKNOWN_TASK/);
-  assert.throws(() => setTaskPriorities(s, OWNER, [payment.id], []), /INVALID_PRIORITIES/);
-  assert.throws(() => setTaskPriorities(s, VIEWER, [payment.id], [1]), /FORBIDDEN_CONTROL/);
+  assert.throws(
+    () => setTaskPriorities(s, OWNER, [payment.id], []),
+    /INVALID_PRIORITIES/,
+  );
+  assert.throws(
+    () => setTaskPriorities(s, VIEWER, [payment.id], [1]),
+    /FORBIDDEN_CONTROL/,
+  );
+});
+
+test('planning weights β, γ, δ are policy fields with safe defaults and bounds', () => {
+  const s = fresh();
+  setPolicy(s, OWNER, { policy: 'primal_dual' });
+  const read = () => JSON.parse(s.run.policyJson);
+  assert.equal(read().deadlineWeight, 0.1);
+  assert.equal(read().executionWeight, 0);
+  assert.equal(read().coordinationWeight, 0);
+  setPolicy(s, OWNER, {
+    deadlineWeight: 1.5,
+    executionWeight: 0.4,
+    coordinationWeight: 1,
+  });
+  assert.equal(read().policy, 'primal_dual', 'a weight patch keeps the policy');
+  assert.equal(read().deadlineWeight, 1.5);
+  assert.throws(
+    () => setPolicy(s, OWNER, { executionWeight: -1 }),
+    /executionWeight/,
+  );
 });

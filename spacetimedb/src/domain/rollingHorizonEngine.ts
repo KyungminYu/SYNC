@@ -1,7 +1,8 @@
 import { admissionBackpressure } from './staffing.ts';
 import { taskOrders } from './cartWorkflow.ts';
 import type { State } from './model.ts';
-import { nextBase } from './model.ts';
+import { nextBase, readPolicy } from './model.ts';
+import { DEFAULT_POLICY_CONFIG } from '../policies/scheduler.ts';
 import type { Assignment } from '../policies/scheduler.ts';
 
 // Fixed deterministic work bounds; these are algorithm parameters, not wall time.
@@ -63,6 +64,13 @@ export class RollingHorizonEngine {
         : 'horizon_wakeup';
     const now = s.run.tick;
     const end = now + ROLLING_CONFIG.horizon;
+    // Planning weights (β, γ, δ) from the run's policy; defaults keep the
+    // original coefficients (lateness 0.1, no extra cost term, full effort).
+    const weights = { ...DEFAULT_POLICY_CONFIG, ...readPolicy(s) };
+    const iterations = Math.max(
+      4,
+      Math.round(ROLLING_CONFIG.iterations / (1 + weights.coordinationWeight)),
+    );
     const capacity = new Map<string, bigint>();
     const taskById = new Map(s.tasks.map((t) => [t.id, t]));
     const membersByTask = new Map(s.tasks.map((t) => [t.id, taskOrders(s, t)]));
@@ -180,12 +188,14 @@ export class RollingHorizonEngine {
             membersByTask.get(task.id)!.reduce((v, o) => v + o.value, 0) +
             task.priority +
             age * 0.05 +
-            Math.min(30, late) * 0.1 +
+            Math.min(30, late) * weights.deadlineWeight +
             (task.kind === 'wash_pitcher' &&
             !s.utensils.some((u) => u.state === 'clean')
               ? 20
               : 0) -
-            Math.min(1, Number(task.estimatedCostMicrousd) / 1000000);
+            Math.min(1, Number(task.estimatedCostMicrousd) / 1000000) -
+            (weights.executionWeight * Number(task.estimatedCostMicrousd)) /
+              1000;
           candidates.push({
             taskId: task.id,
             workerId: worker.id,
@@ -275,11 +285,7 @@ export class RollingHorizonEngine {
     const objective = (rows: Candidate[]) =>
       rows.reduce((v, c) => v + c.utility, 0);
     let best = repair(false);
-    for (
-      let iteration = 0;
-      iteration < ROLLING_CONFIG.iterations;
-      iteration++
-    ) {
+    for (let iteration = 0; iteration < iterations; iteration++) {
       const repaired = repair(true);
       if (objective(repaired) > objective(best)) best = repaired;
       const relaxed = new Map<bigint, Candidate>();
