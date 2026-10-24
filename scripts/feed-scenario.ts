@@ -42,6 +42,7 @@ import {
 import { Identity } from 'spacetimedb';
 import { driveScenario } from './lib/driveScenario';
 import { LlmPlanner } from './lib/llmPlanner';
+import { SCENARIO_T } from '../apps/web/src/sync/shopLayout';
 
 /** --name value flags with defaults. */
 function flag(name: string, fallback: string) {
@@ -239,6 +240,8 @@ async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
             llm = new LlmPlanner({
               conn,
               runId: sync,
+              scenario: scenario.id,
+              horizon: SCENARIO_T,
               log: console.log,
               report: async (u) => {
                 await granted;
@@ -260,6 +263,7 @@ async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
         : undefined,
       beforeStep: (tick) => llm?.beforeStep(tick),
     });
+    if (ids) llm?.finish();
     console.log(
       `done: ${scenario.id} runs ${ids?.baseline} and ${ids?.sync} completed`,
     );
