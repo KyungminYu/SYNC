@@ -50,6 +50,7 @@ import SetPolicyReducer from "./set_policy_reducer";
 import SetResourceAvailableReducer from "./set_resource_available_reducer";
 import SetResourceCapacityReducer from "./set_resource_capacity_reducer";
 import SetRunStatusReducer from "./set_run_status_reducer";
+import SetTaskPrioritiesReducer from "./set_task_priorities_reducer";
 import StepRunReducer from "./step_run_reducer";
 import SubmitAgentActionReducer from "./submit_agent_action_reducer";
 
@@ -193,6 +194,7 @@ const reducersSchema = __reducers(
   __reducerSchema("set_resource_available", SetResourceAvailableReducer),
   __reducerSchema("set_resource_capacity", SetResourceCapacityReducer),
   __reducerSchema("set_run_status", SetRunStatusReducer),
+  __reducerSchema("set_task_priorities", SetTaskPrioritiesReducer),
   __reducerSchema("step_run", StepRunReducer),
   __reducerSchema("submit_agent_action", SubmitAgentActionReducer),
 );

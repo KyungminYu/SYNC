@@ -13,6 +13,7 @@ import {
   addOrder,
   setMember,
   setPolicy,
+  setTaskPriorities,
   setRunning,
   closeArrivals,
   advance,
@@ -161,6 +162,21 @@ export const set_policy = db.reducer(
       patch as Partial<PolicyConfig>,
     );
     schedule(s);
+    save(store, s);
+  },
+);
+/** Advisory per-task priorities from an external planner (owner/operator). */
+export const set_task_priorities = db.reducer(
+  { runId: t.u64(), taskIds: t.array(t.u64()), priorities: t.array(t.u32()) },
+  (ctx, args) => {
+    const store = ctx.db as unknown as MutableDb;
+    const s = load(store, args.runId);
+    setTaskPriorities(
+      s,
+      { identityHex: ctx.sender.toHexString() },
+      args.taskIds,
+      args.priorities,
+    );
     save(store, s);
   },
 );

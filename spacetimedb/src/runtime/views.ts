@@ -68,6 +68,8 @@ const taskRow = t.row('UiTaskPayload', {
   steps: t.array(t.string()),
   error_code: t.option(t.string()),
   estimated_slack_ticks: t.option(t.i64()),
+  /** Current priority (an external planner may raise it before the task starts). */
+  priority: t.u32(),
 });
 const edgeRow = t.row('UiDagEdgePayload', {
   ...base,
@@ -330,6 +332,7 @@ export const ui_tasks = db.view(
                     task.durationTicks -
                     downstreamTail(s, task),
                 ),
+          priority: task.priority,
         };
       }),
     ),

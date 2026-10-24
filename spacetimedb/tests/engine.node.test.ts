@@ -20,6 +20,7 @@ import {
   setMember,
   setPolicy,
   setRunning,
+  setTaskPriorities,
   snapshot,
   submitAction,
 } from '../src/domain/engine.ts';
@@ -711,4 +712,21 @@ test('invariant checks detect cross-run rows and malformed dependency links', ()
   s.dependencies[0]!.predecessorId = 9_999_999n;
   assert.throws(() => assertInvariants(s), /INVALID_EDGE/);
   assert.equal(o.status, 'open');
+});
+
+test('external task priorities apply only to tasks that have not started', () => {
+  const s = fresh();
+  const o = order(s);
+  const capture = taskFor(s, o.id, 'capture_order');
+  const payment = taskFor(s, o.id, 'take_payment');
+  capture.status = 'assigned';
+  const version = s.run.version;
+  setTaskPriorities(s, OWNER, [capture.id, payment.id], [9, 7]);
+  assert.equal(capture.priority, 1, 'an assigned task keeps its priority');
+  assert.equal(payment.priority, 7);
+  assert.ok(s.run.version > version);
+  assert.throws(() => setTaskPriorities(s, OWNER, [payment.id], [101]), /INVALID_PRIORITY/);
+  assert.throws(() => setTaskPriorities(s, OWNER, [999n], [1]), /UNKNOWN_TASK/);
+  assert.throws(() => setTaskPriorities(s, OWNER, [payment.id], []), /INVALID_PRIORITIES/);
+  assert.throws(() => setTaskPriorities(s, VIEWER, [payment.id], [1]), /FORBIDDEN_CONTROL/);
 });
