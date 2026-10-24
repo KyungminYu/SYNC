@@ -1,9 +1,9 @@
+import { memo } from 'react';
 import type {
   Agent,
   Decision,
   Policy,
   Resource,
-  ResourceType,
 } from '../../sync/contract';
 import {
   decisionsAt,
@@ -30,14 +30,6 @@ interface Props {
   onSelect(d: Decision): void;
 }
 
-/** Row titles per kind of work, as in the Figma rows ("c28 · Take order"). */
-const WORK: Record<ResourceType, string> = {
-  register: 'Take order',
-  bar: 'Make drink',
-  pickup: 'Hand to customer',
-  clean: 'Clean up',
-};
-
 /** Simulated seconds with one decimal. */
 const fmtT = (t: number) => `${t.toFixed(1)}s`;
 
@@ -51,7 +43,8 @@ function KindChip({ kind }: { kind: Decision['kind'] }) {
   );
 }
 
-export function DecisionsPanel(p: Props) {
+/** Memoised: re-renders when a new decision is due, not on every playback tick. */
+export const DecisionsPanel = memo(function DecisionsPanel(p: Props) {
   const { list, counts } = decisionsAt(p.decisions, p.t, p.filter);
   // Id → display lookups; fall back to the raw id.
   const agent = (id?: string) => p.agents.find((a) => a.id === id);
@@ -94,7 +87,9 @@ export function DecisionsPanel(p: Props) {
       <ol className="history">
         {list.map((d) => {
           const who = agent(d.agentId);
-          const work = WORK[resource(d.resourceId)?.type ?? 'register'];
+          // Row title names the actual step ("c28 · Payment"), so one
+          // customer's steps at the same station stay distinguishable.
+          const work = d.taskLabel;
           return (
             <li key={d.id}>
               <button
@@ -211,4 +206,4 @@ export function DecisionsPanel(p: Props) {
       )}
     </aside>
   );
-}
+});

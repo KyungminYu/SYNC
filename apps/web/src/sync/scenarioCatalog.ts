@@ -2,13 +2,14 @@ import type { OrderItem } from './contract';
 import { MENU } from './menu';
 
 /**
- * Fixed live scenarios: three per load level, each turning up one lever of
- * difficulty on the same customers (mock scenario, seed 5). The values are
- * provisional and live only here (design doc §7).
- *   -1 speed  — customers arrive faster (arrival times × factor)
- *   -2 volume — customers order more drinks
- *   -3 stream — customers arrive back to back in groups (one every STREAM_GAP s)
- * Deadlines, recipes and the menu are unchanged.
+ * Fixed live scenarios, ranked by how many drinks the shop must make.
+ *
+ * Each scenario is a number of customers (12 / 16 / 20) and an order size
+ * (1 drink each, 1–2, or 1–3). The nine combinations are sorted by total
+ * drinks; on a tie the one with fewer customers is easier. Arrivals keep the
+ * mock's pace (the first customers of the mock scenario), so more customers
+ * also means a longer stream of arrivals. Values live only here
+ * (design doc §7).
  */
 
 /** Load levels, lightest first (also the dropdown group order). */
@@ -20,39 +21,62 @@ export interface ScenarioDef {
   id: string;
   load: Load;
   n: 1 | 2 | 3;
+  /** Customers who come in. */
+  customers: number;
+  /** Most drinks one customer orders (1 = one each, 2 = 1–2, 3 = 1–3). */
+  maxDrinks: 1 | 2 | 3;
+  /** Drinks the shop must make (exact). */
+  drinks: number;
   /** One line for the dropdown. */
   description: string;
-  /** Arrival times × this (1 = unchanged). */
-  arrivalFactor: number;
-  /** Extra drinks per customer, as [share of customers, drinks added]. */
-  extraDrinks: [number, number];
-  /** Customers per back-to-back stream (1 = arrivals unchanged). */
-  groupSize: number;
 }
 
-/** Seconds between customers within one stream: they keep coming, never all at once. */
-export const STREAM_GAP = 2;
+/** Drinks per customer: as even a split of 1..maxDrinks as possible. */
+function drinkCounts(customers: number, maxDrinks: number): number[] {
+  const base = Math.floor(customers / maxDrinks);
+  const extra = customers % maxDrinks;
+  // Leftover customers keep the average at (1 + maxDrinks) / 2: an odd one
+  // takes the middle size, pairs take the two ends (1 and maxDrinks), …
+  const bonus = new Set<number>();
+  let left = extra;
+  if (left % 2 === 1 && maxDrinks % 2 === 1) {
+    bonus.add((maxDrinks + 1) / 2);
+    left--;
+  }
+  for (let lo = 1, hi = maxDrinks; left >= 2 && lo < hi; lo++, hi--) {
+    bonus.add(lo).add(hi);
+    left -= 2;
+  }
+  const counts: number[] = [];
+  for (let k = 1; k <= maxDrinks; k++) {
+    const n = base + (bonus.has(k) ? 1 : 0);
+    for (let i = 0; i < n; i++) counts.push(k);
+  }
+  return counts;
+}
 
-const BASE = { arrivalFactor: 1, extraDrinks: [0, 0] as [number, number], groupSize: 1 };
-/** Lever strength per level: speed factor, extra drinks, group size. */
-const LEVELS: Record<Load, { speed: number; drinks: [number, number]; group: number }> = {
-  Low: { speed: 0.85, drinks: [1 / 3, 1], group: 2 },
-  Mid: { speed: 0.65, drinks: [1, 1], group: 4 },
-  High: { speed: 0.45, drinks: [1, 2], group: 6 },
-};
+const SIZE_TEXT = { 1: '1 drink each', 2: '1–2 drinks', 3: '1–3 drinks' } as const;
 
-export const SCENARIOS: ScenarioDef[] = LOADS.flatMap((load) => {
-  const l = LEVELS[load];
-  const drinks =
-    l.drinks[0] < 1
-      ? `1 in ${Math.round(1 / l.drinks[0])} +${l.drinks[1]}`
-      : `all +${l.drinks[1]}`;
-  return [
-    { ...BASE, id: `${load}-1`, load, n: 1 as const, description: `Faster arrivals ×${l.speed}`, arrivalFactor: l.speed },
-    { ...BASE, id: `${load}-2`, load, n: 2 as const, description: `More drinks: ${drinks}`, extraDrinks: l.drinks },
-    { ...BASE, id: `${load}-3`, load, n: 3 as const, description: `Back-to-back streams of ${l.group} (${STREAM_GAP} s apart)`, groupSize: l.group },
-  ];
-});
+/** Every customers × order-size pair, ranked by drinks (ties: fewer customers). */
+export const SCENARIOS: ScenarioDef[] = ([12, 16, 20] as const)
+  .flatMap((customers) =>
+    ([1, 2, 3] as const).map((maxDrinks) => {
+      const drinks = drinkCounts(customers, maxDrinks).reduce((a, b) => a + b, 0);
+      return { customers, maxDrinks, drinks };
+    }),
+  )
+  .sort((a, b) => a.drinks - b.drinks || a.customers - b.customers)
+  .map((s, i) => {
+    const load = LOADS[Math.floor(i / 3)];
+    const n = ((i % 3) + 1) as 1 | 2 | 3;
+    return {
+      ...s,
+      id: `${load}-${n}`,
+      load,
+      n,
+      description: `${s.customers} customers · ${SIZE_TEXT[s.maxDrinks]} (${s.drinks} drinks)`,
+    };
+  });
 
 export const scenarioById = (id: string) => SCENARIOS.find((s) => s.id === id);
 
@@ -63,24 +87,38 @@ export interface ScenarioCustomer {
   items: OrderItem[];
 }
 
-/** Applies a scenario's levers to the base customers (deterministic). */
-export function applyScenario(def: ScenarioDef, base: ScenarioCustomer[]): ScenarioCustomer[] {
-  const [share, add] = def.extraDrinks;
-  return base.map((c, i) => {
-    // A stream starts when its first customer would have come; the rest
-    // follow one after another, STREAM_GAP seconds apart.
-    const first = Math.floor(i / def.groupSize) * def.groupSize;
-    const lead = base[first];
-    // Every (1/share)-th customer gets the extra drinks, alternating through the menu.
-    const extra = share > 0 && i % Math.round(1 / share) === 0 ? add : 0;
-    return {
-      id: c.id,
-      arrival:
-        Math.round((lead.arrival * def.arrivalFactor + (i - first) * STREAM_GAP) * 100) / 100,
-      items: [
-        ...c.items,
-        ...Array.from({ length: extra }, (_, k) => MENU[(i + k) % MENU.length]),
-      ],
-    };
-  });
+/** Small deterministic PRNG, so a scenario is the same on every run. */
+function rng(seed: number) {
+  let n = seed >>> 0 || 1;
+  return () => {
+    n = (Math.imul(n, 1664525) + 1013904223) >>> 0;
+    return n / 4294967296;
+  };
+}
+
+/**
+ * The scenario's customers: the first `def.customers` of `base` (their ids
+ * and arrival times), each ordering their share of drinks. Who orders how
+ * many, and which drinks, is shuffled with `seed` (fixed per scenario).
+ */
+export function applyScenario(
+  def: ScenarioDef,
+  base: ScenarioCustomer[],
+  seed = 5,
+): ScenarioCustomer[] {
+  const random = rng(seed * 101 + def.customers * 7 + def.maxDrinks);
+  const counts = drinkCounts(def.customers, def.maxDrinks);
+  // Fisher–Yates shuffle so big orders are spread over the arrivals.
+  for (let i = counts.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [counts[i], counts[j]] = [counts[j], counts[i]];
+  }
+  return base.slice(0, def.customers).map((c, i) => ({
+    id: c.id,
+    arrival: c.arrival,
+    items: Array.from(
+      { length: counts[i] },
+      () => MENU[Math.floor(random() * MENU.length)],
+    ),
+  }));
 }

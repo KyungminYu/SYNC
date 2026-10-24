@@ -34,9 +34,11 @@ const TOKEN_KEY = `sync-token:${env.VITE_SPACETIMEDB_URI}:${env.VITE_SPACETIMEDB
 const REBUILD_MS = 150;
 /**
  * An unfinished scenario whose tick has not moved for this long (ms) has lost
- * its driver (feeder stopped): it is shown as stopped and can be rerun.
+ * its driver (feeder stopped): it is shown as stopped and can be rerun. The
+ * engine can take several seconds for one busy tick, so this is generous;
+ * otherwise a slow tick flips the run to stopped and back (controls flicker).
  */
-const STALL_MS = 5000;
+const STALL_MS = 20000;
 
 /** Reads a stored token; storage can be unavailable (private mode). */
 function loadToken() {
@@ -92,6 +94,11 @@ export function scenariosOf(runs: RunRow[], completedOnly = false): Scenario[] {
   const latest = new Map<string, Scenario>();
   for (const s of byId.values()) {
     if (completedOnly && !done(s)) continue;
+    // Only whole Baseline/SYNC pairs: while a pair is being set up, half of
+    // it would show one empty floor (and hide the previous pair). External
+    // worker runs are a single SYNC run by design.
+    if (s.load !== 'External workers' && (!s.runs.baseline || !s.runs.sync))
+      continue;
     const old = latest.get(s.id);
     if (!old || newestId(s) > newestId(old)) latest.set(s.id, s);
   }
@@ -133,6 +140,8 @@ export class SpacetimeSyncSource implements SyncSource {
   private known?: Map<string, bigint>;
   /** Last tick seen per scenario and when it last moved (stall detection). */
   private progress = new Map<string, { tick: number; at: number }>();
+  /** Newest run id per scenario the runner stopped; a rerun gets newer ids. */
+  private halted = new Map<string, bigint>();
   /** True once the first subscribed rows were read (later scenarios are new). */
   private loaded = false;
   /** Live: periodic re-check so a stalled scenario turns 'stopped' without new rows. */
@@ -252,6 +261,13 @@ export class SpacetimeSyncSource implements SyncSource {
     this.rebuild();
   }
 
+  runnerStopped() {
+    const runs = this.conn ? ([...this.conn.db.uiRuns.iter()] as RunRow[]) : [];
+    for (const s of scenariosOf(runs, this.mode === 'stored'))
+      if (!done(s)) this.halted.set(s.id, newestId(s));
+    this.rebuild();
+  }
+
   private set(next: SyncSnapshot) {
     this.snapshot = next;
     for (const l of this.listeners) l();
@@ -318,6 +334,7 @@ export class SpacetimeSyncSource implements SyncSource {
     const firstLoad = !this.loaded;
     const state = (s: Scenario) => {
       if (done(s)) return 'completed';
+      if (this.halted.get(s.id) === newestId(s)) return 'stopped';
       const tick = (s.runs.sync ?? s.runs.baseline)!.tick;
       const seen = this.progress.get(s.id);
       if (!seen) this.progress.set(s.id, { tick, at: firstLoad ? 0 : now });

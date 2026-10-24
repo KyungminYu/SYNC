@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Decision, Policy } from '../sync/contract';
 import type { RunnerClock, ScenarioRunner } from '../sync/runner';
 import type { ScenarioOption, SyncSource } from '../sync/source';
@@ -19,6 +19,9 @@ import { scoreAt } from './model/scoreAt';
 import { peakLine, peakWaiting, sceneAt } from './model/scene';
 import { usePlayback } from './usePlayback';
 import { useSyncSnapshot } from './useSyncSnapshot';
+
+/** Shared empty list, so memoised panels see the same array when there is no run. */
+const NONE: never[] = [];
 
 /** The one-screen dashboard. Knows only the SyncSource port, never an adapter. */
 export function Dashboard({
@@ -80,6 +83,14 @@ export function Dashboard({
   const [policy, setPolicy] = useState<Policy>('sync');
   const [filter, setFilter] = useState<DecisionFilter>('all');
   const [selected, setSelected] = useState<Decision>();
+  // Stop the runner, then tell the source at once: its runs stay unfinished
+  // in the database, so it would otherwise notice only when ticks stop moving.
+  const stopRunner =
+    runner?.stop &&
+    (async () => {
+      await runner.stop!();
+      source.runnerStopped?.();
+    });
 
   // Another scenario: forget the selected decision. A replay starts from 0;
   // in Live a finished scenario opens on its final tick, and a running one
@@ -114,7 +125,31 @@ export function Dashboard({
     baseline: baseline ? sceneAt(baseline, t, lanes) : null,
     sync: sync ? sceneAt(sync, t, lanes) : null,
   };
+  // Scores move once per simulated second; memo keeps the card still in between.
+  const second = Math.floor(t);
+  const syncScore = useMemo(() => sync && scoreAt(sync, second), [sync, second]);
+  const baselineScore = useMemo(
+    () => baseline && scoreAt(baseline, second),
+    [baseline, second],
+  );
   const panelRun = runs[policy];
+  // The decision list only changes when the next decision is reached, so it
+  // gets the time of the newest decision so far (not every playback tick).
+  const decisionT = useMemo(() => {
+    const ds = panelRun?.decisions ?? [];
+    let lo = 0,
+      hi = ds.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ds[mid].t <= t) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo ? ds[lo - 1].t : -1;
+  }, [panelRun, t]);
+  const onPolicy = useCallback((p: Policy) => {
+    setPolicy(p);
+    setSelected(undefined);
+  }, []);
   // Outline the selected decision's agent, slot and customer on the panel's policy floor only.
   const highlight = (p: Policy) =>
     selected && p === policy
@@ -181,10 +216,10 @@ export function Dashboard({
                   await runner.start(id, viewer);
                 })
               }
-              onStop={runner?.stop && (() => runner.stop!())}
+              onStop={stopRunner}
               footnote={
                 runner
-                  ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); each scenario changes one lever.'
+                  ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); scenarios differ by customers and drinks per order.'
                   : undefined
               }
             />
@@ -199,7 +234,7 @@ export function Dashboard({
         onStop={
           scenarios?.find((s) => s.id === scenarioId)?.canRun === false
             ? undefined
-            : runner?.stop && (() => void runner.stop!())
+            : stopRunner && (() => void stopRunner())
         }
         mode={mode}
         onMode={onMode}
@@ -254,31 +289,34 @@ export function Dashboard({
               <ShopCard
                 policy="baseline"
                 scene={scenes.baseline}
+                data={baseline ?? null}
+                lanes={lanes}
+                timeRef={playback.timeRef}
                 highlight={highlight('baseline')}
               />
               <ShopCard
                 policy="sync"
                 scene={scenes.sync}
+                data={sync ?? null}
+                lanes={lanes}
+                timeRef={playback.timeRef}
                 highlight={highlight('sync')}
               />
             </div>
             <Scorecard
-              sync={sync && scoreAt(sync, t)}
-              baseline={baseline && scoreAt(baseline, t)}
+              sync={syncScore}
+              baseline={baselineScore}
               benchmark={benchmark}
               seedLine={source.origin === 'sample'}
             />
           </div>
           <DecisionsPanel
             policy={policy}
-            onPolicy={(p) => {
-              setPolicy(p);
-              setSelected(undefined);
-            }}
-            decisions={panelRun?.decisions ?? []}
-            agents={panelRun?.layout.agents ?? []}
-            resources={panelRun?.layout.resources ?? []}
-            t={t}
+            onPolicy={onPolicy}
+            decisions={panelRun?.decisions ?? NONE}
+            agents={panelRun?.layout.agents ?? NONE}
+            resources={panelRun?.layout.resources ?? NONE}
+            t={decisionT}
             filter={filter}
             onFilter={setFilter}
             selectedId={selected?.id}

@@ -9,8 +9,8 @@ import { databaseConfig } from './lib/databaseConfig.mjs';
  *   corepack pnpm feed --scenario Mid-2 [--viewer <identity hex>]
  *                      [--db sync-coffee-live] [--trays 12] [--ms 200]
  *
- * Every scenario uses the mock's customers (seed 5) and turns up one lever:
- * -1 faster arrivals, -2 more drinks, -3 arrivals in groups.
+ * Scenarios differ by customers (12 / 16 / 20) and order size (1, 1–2, 1–3
+ * drinks), ranked by total drinks; arrivals keep the mock's pace (seed 5).
  *
  * Runs are private to their owner (this script). --viewer grants a dashboard
  * identity viewer access; viewers are remembered in .local/feeder-viewers so
@@ -31,6 +31,7 @@ import {
   applyScenario,
   scenarioById,
   SCENARIOS,
+  type ScenarioDef,
 } from '../apps/web/src/sync/scenarioCatalog';
 import { driveScenario } from './lib/driveScenario';
 
@@ -43,21 +44,24 @@ function flag(name: string, fallback: string) {
 const SEED = 5;
 const trays = Number(flag('trays', '12'));
 /** Wall-clock ms per tick: 200 ms = 5× real time (same as the engine clock). */
-// Global clock: one scenario second per 1.5 s of wall time (the engine needs
-// ~1.2 s per tick, so it can keep up).
-const tickMs = Number(flag('ms', '1500'));
+// Global clock: one scenario second per 2 s of wall time. The engine needs
+// ~1.2 s per tick on average and more when customers bunch up, so it keeps
+// up; 180 ticks take about 6 minutes.
+const tickMs = Number(flag('ms', '2000'));
 const config = databaseConfig();
 const uri = flag('uri', config.uri);
 const database = flag('db', config.database);
 if (!Number.isInteger(trays) || trays < 1 || trays > 20)
   throw new Error('--trays must be 1�20');
 if (!Number.isInteger(tickMs) || tickMs < 0 || tickMs > 60000)
-  throw new Error('--ms must be 0�60000');
-const scenario = scenarioById(flag('scenario', ''));
-if (!scenario)
+  throw new Error('--ms must be 0–60000');
+const picked = scenarioById(flag('scenario', ''));
+if (!picked)
   throw new Error(
     `--scenario must be one of ${SCENARIOS.map((s) => s.id).join(', ')}`,
   );
+// Bound once checked: narrowing does not reach into the functions below.
+const scenario: ScenarioDef = picked;
 
 mkdirSync('.local', { recursive: true });
 // One scenario at a time: a new feeder ends any feeder still running (from
@@ -108,7 +112,7 @@ if (newViewer) {
 function connect() {
   return new Promise<DbConnection>((resolve, reject) => {
     const timer = setTimeout(() => {
-      connection?.disconnect();
+      connection.disconnect();
       reject(new Error('Database connection timed out'));
     }, 10000);
     const connection = DbConnection.builder()
@@ -171,7 +175,8 @@ async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
     console.log(
       'no --viewer given: only this feeder identity can see the runs',
     );
-  // The scenario's customers: the mock's (same seed) with its lever applied.
+  // The scenario's customers: the mock's first ones (same seed, same arrival
+  // pace), each ordering the scenario's share of drinks.
   const customers = applyScenario(
     scenario,
     simulate('baseline', { seed: SEED }).jobs.map((job) => ({

@@ -81,6 +81,11 @@ export interface SyncSource {
   readonly commands?: SyncCommands;
   /** Switch to another entry of `snapshot.scenarios`. */
   selectScenario?(id: string): void;
+  /**
+   * The runner stopped driving: unfinished scenarios count as stopped at once
+   * (instead of after their tick stops moving) until newer runs appear.
+   */
+  runnerStopped?(): void;
   /** Begin receiving data. Called when the dashboard mounts. */
   connect(): void;
   /** Stop receiving data. Called when the dashboard unmounts. */
