@@ -49,7 +49,7 @@ const TERMS: Term[] = [
     label: 'Planning time',
     hint: 'lower is better · optimizer overhead',
     value: (s) => s.planningMs,
-    text: (s) => `${s.planningMs} ms total`,
+    text: (s) => `${planningSeconds(s.planningMs!)} total`,
     // Leave headroom so the longer bar does not fill the whole track.
     scale: (both) =>
       Math.max(0.1, ...both.map((s) => s.planningMs ?? 0)) * 1.15,
@@ -89,7 +89,13 @@ const SPEED: Array<{
 const seconds = (v: number) =>
   `${Number.isInteger(v) ? v : (Math.round(v * 10) / 10).toFixed(1)} s`;
 
-/** "3 more orders", "12 fewer customers late", "1.6 ms more planning time". */
+/** Planning time in seconds: "126.3 s", or "0.002 s" below one second. */
+const planningSeconds = (ms: number) => {
+  const s = ms / 1000;
+  return `${s >= 1 ? s.toFixed(1) : s.toFixed(3)} s`;
+};
+
+/** "3 more orders", "12 fewer customers late", "1.2 s more planning time". */
 function summary(baseline: Score, sync: Score) {
   const round = (v: number) => Math.round(v * 10) / 10;
   const diff = (n: number, more: string, fewer: string, unit: string) =>
@@ -105,7 +111,9 @@ function summary(baseline: Score, sync: Score) {
   if (sync.planningMs === null || baseline.planningMs === null)
     return `${head}.`;
   const planning = sync.planningMs - baseline.planningMs;
-  return `${head}, for ${diff(planning, 'more', 'less', 'ms planning time')}.`;
+  return planning === 0
+    ? `${head}, for the same planning time.`
+    : `${head}, for ${planningSeconds(Math.abs(planning))} ${planning > 0 ? 'more' : 'less'} planning time.`;
 }
 
 /** Memoised: the scores change about once per second, not every frame. */
