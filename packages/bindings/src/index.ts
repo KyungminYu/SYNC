@@ -42,8 +42,10 @@ import GrantMemberReducer from "./grant_member_reducer";
 import MarkJobUncertainReducer from "./mark_job_uncertain_reducer";
 import ReconcileJobReducer from "./reconcile_job_reducer";
 import ReportUsageReducer from "./report_usage_reducer";
+import SetModeledBudgetReducer from "./set_modeled_budget_reducer";
 import SetPolicyReducer from "./set_policy_reducer";
 import SetResourceAvailableReducer from "./set_resource_available_reducer";
+import SetResourceCapacityReducer from "./set_resource_capacity_reducer";
 import SetRunStatusReducer from "./set_run_status_reducer";
 import StepRunReducer from "./step_run_reducer";
 import SubmitAgentActionReducer from "./submit_agent_action_reducer";
@@ -57,6 +59,7 @@ import UiDecisionsRow from "./ui_decisions_table";
 import UiEventsRow from "./ui_events_table";
 import UiMetricsRow from "./ui_metrics_table";
 import UiOrdersRow from "./ui_orders_table";
+import UiPlannerRow from "./ui_planner_table";
 import UiPolicyCatalogRow from "./ui_policy_catalog_table";
 import UiResourcesRow from "./ui_resources_table";
 import UiRunsRow from "./ui_runs_table";
@@ -110,6 +113,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, UiOrdersRow),
+  uiPlanner: __table({
+    name: 'ui_planner',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, UiPlannerRow),
   uiPolicyCatalog: __table({
     name: 'ui_policy_catalog',
     indexes: [
@@ -164,8 +174,10 @@ const reducersSchema = __reducers(
   __reducerSchema("mark_job_uncertain", MarkJobUncertainReducer),
   __reducerSchema("reconcile_job", ReconcileJobReducer),
   __reducerSchema("report_usage", ReportUsageReducer),
+  __reducerSchema("set_modeled_budget", SetModeledBudgetReducer),
   __reducerSchema("set_policy", SetPolicyReducer),
   __reducerSchema("set_resource_available", SetResourceAvailableReducer),
+  __reducerSchema("set_resource_capacity", SetResourceCapacityReducer),
   __reducerSchema("set_run_status", SetRunStatusReducer),
   __reducerSchema("step_run", StepRunReducer),
   __reducerSchema("submit_agent_action", SubmitAgentActionReducer),
@@ -189,6 +201,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "ui_metrics": Omit<typeof tablesSchema.schemaType.tables["uiMetrics"], "accessorName"> & { readonly accessorName: "ui_metrics" };
     /** @deprecated Use `uiOrders` instead. This alias will be removed in the next major version. */
     readonly "ui_orders": Omit<typeof tablesSchema.schemaType.tables["uiOrders"], "accessorName"> & { readonly accessorName: "ui_orders" };
+    /** @deprecated Use `uiPlanner` instead. This alias will be removed in the next major version. */
+    readonly "ui_planner": Omit<typeof tablesSchema.schemaType.tables["uiPlanner"], "accessorName"> & { readonly accessorName: "ui_planner" };
     /** @deprecated Use `uiPolicyCatalog` instead. This alias will be removed in the next major version. */
     readonly "ui_policy_catalog": Omit<typeof tablesSchema.schemaType.tables["uiPolicyCatalog"], "accessorName"> & { readonly accessorName: "ui_policy_catalog" };
     /** @deprecated Use `uiResources` instead. This alias will be removed in the next major version. */
@@ -225,6 +239,7 @@ const tableAccessorAliases = {
   "ui_events": "uiEvents",
   "ui_metrics": "uiMetrics",
   "ui_orders": "uiOrders",
+  "ui_planner": "uiPlanner",
   "ui_policy_catalog": "uiPolicyCatalog",
   "ui_resources": "uiResources",
   "ui_runs": "uiRuns",
@@ -263,6 +278,8 @@ export type DbView = __DbViewBase & {
   readonly "ui_metrics": __DbViewBase["uiMetrics"];
   /** @deprecated Use `uiOrders` instead. This alias will be removed in the next major version. */
   readonly "ui_orders": __DbViewBase["uiOrders"];
+  /** @deprecated Use `uiPlanner` instead. This alias will be removed in the next major version. */
+  readonly "ui_planner": __DbViewBase["uiPlanner"];
   /** @deprecated Use `uiPolicyCatalog` instead. This alias will be removed in the next major version. */
   readonly "ui_policy_catalog": __DbViewBase["uiPolicyCatalog"];
   /** @deprecated Use `uiResources` instead. This alias will be removed in the next major version. */
@@ -291,6 +308,8 @@ export type Tables = __TablesBase & {
   readonly "ui_metrics": __TablesBase["uiMetrics"];
   /** @deprecated Use `uiOrders` instead. This alias will be removed in the next major version. */
   readonly "ui_orders": __TablesBase["uiOrders"];
+  /** @deprecated Use `uiPlanner` instead. This alias will be removed in the next major version. */
+  readonly "ui_planner": __TablesBase["uiPlanner"];
   /** @deprecated Use `uiPolicyCatalog` instead. This alias will be removed in the next major version. */
   readonly "ui_policy_catalog": __TablesBase["uiPolicyCatalog"];
   /** @deprecated Use `uiResources` instead. This alias will be removed in the next major version. */

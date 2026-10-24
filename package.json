@@ -25,7 +25,9 @@
     "feed": "tsx scripts/feed-scenario.ts",
     "db:build": "node scripts/db.mjs build",
     "test:domain": "node scripts/test-domain.mjs",
-    "test:module": "vitest run"
+    "test:module": "vitest run",
+    "db:login": "node scripts/db.mjs login",
+    "db:describe": "node scripts/db.mjs describe"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -1,65 +1,130 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import type { Plugin } from 'vite';
+import { repoRoot } from '../../scripts/lib/databaseConfig.mjs';
 
-/**
- * Dev-server only: lets the dashboard start the test feeder
- * (scripts/feed-scenario.ts) for checking work in progress. The dashboard
- * never writes to SpacetimeDB itself; it asks this local endpoint, and the
- * feeder process writes the scenario.
- *
- *   POST /__dev/feed  {"scenario":"Mid-2","viewer":"<identity hex>"}
- *     202 started · 409 a feeder is already running · 400 bad input
- *   GET  /__dev/feed  → {"running": boolean, "lastLine": string}
- */
-export function devFeederPlugin(database: string): Plugin {
-  const repoRoot = resolve(__dirname, '../..');
+export function devFeederPlugin(config: {
+  uri: string;
+  database: string;
+}): Plugin {
   let child: ChildProcess | undefined;
   let lastLine = '';
+  let state: 'idle' | 'starting' | 'running' | 'completed' | 'failed' = 'idle';
+  let scenario: string | undefined;
+  let jobId = 0;
   return {
     name: 'sync-dev-feeder',
     apply: 'serve',
     configureServer(server) {
+      server.httpServer?.once('close', () => child?.kill());
       server.middlewares.use('/__dev/feed', (req, res) => {
         const reply = (code: number, body: object) => {
+          if (res.writableEnded) return;
           res.statusCode = code;
           res.setHeader('content-type', 'application/json');
+          res.setHeader('cache-control', 'no-store');
           res.end(JSON.stringify(body));
         };
+        // The endpoint writes via a privileged local process: allow same-origin only.
+        if (
+          req.headers.origin &&
+          req.headers.origin !== `http://${req.headers.host}` &&
+          req.headers.origin !== `https://${req.headers.host}`
+        )
+          return reply(403, {
+            error: 'Cross-origin feeder requests are not allowed.',
+          });
         if (req.method === 'GET')
-          return reply(200, { running: !!child, lastLine });
-        if (req.method !== 'POST') return reply(405, { error: 'POST or GET' });
+          return reply(200, {
+            running: !!child,
+            state,
+            lastLine,
+            scenario,
+            jobId,
+          });
+        if (req.method !== 'POST')
+          return reply(405, { error: 'POST or GET required' });
         let raw = '';
-        req.on('data', (c) => (raw += c));
-        req.on('end', () => {
-          let body: { scenario?: string; viewer?: string };
-          try {
-            body = JSON.parse(raw || '{}');
-          } catch {
-            return reply(400, { error: 'invalid JSON' });
+        req.on('data', (chunk: Buffer) => {
+          raw += chunk.toString();
+          if (raw.length > 4096) {
+            reply(413, { error: 'Request too large' });
+            req.destroy();
           }
-          const scenario = String(body.scenario ?? '');
+        });
+        req.on('error', () => reply(400, { error: 'Request interrupted' }));
+        req.on('end', () => {
+          if (res.writableEnded) return;
+          let body: { scenario?: unknown; viewer?: unknown };
+          try {
+            body = JSON.parse(raw);
+            if (!body || typeof body !== 'object') throw new Error();
+          } catch {
+            return reply(400, { error: 'Invalid JSON' });
+          }
+          const requested = String(body.scenario ?? '');
           const viewer = String(body.viewer ?? '');
-          // Fixed scenario ids (sync/scenarioCatalog.ts): Low-1 … High-3.
-          if (!/^(Low|Mid|High)-[123]$/.test(scenario))
-            return reply(400, { error: 'scenario must be Low-1 … High-3' });
+          if (!/^(Low|Mid|High)-[123]$/.test(requested))
+            return reply(400, { error: 'Scenario must be Low-1 … High-3' });
           if (!/^[0-9a-f]{64}$/.test(viewer))
-            return reply(400, { error: 'viewer must be a 64-hex identity' });
-          if (child) return reply(409, { error: 'a feeder is already running', lastLine });
-          // Same command as `corepack pnpm feed …`, run from the repo root.
-          child = spawn(
-            resolve(repoRoot, 'node_modules/.bin/tsx'),
-            ['scripts/feed-scenario.ts', '--scenario', scenario, '--db', database, '--viewer', viewer],
-            { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] },
+            return reply(400, { error: 'Viewer must be a 64-hex identity' });
+          if (child)
+            return reply(409, {
+              error: 'A scenario is already running.',
+              lastLine,
+            });
+          scenario = requested;
+          lastLine = 'Starting scenario…';
+          state = 'starting';
+          jobId++;
+          const currentJobId = jobId;
+          // Node resolves tsx's loader on every OS, without shell wrappers or .cmd files.
+          const current = spawn(
+            process.execPath,
+            [
+              '--import',
+              'tsx',
+              resolve(repoRoot, 'scripts/feed-scenario.ts'),
+              '--scenario',
+              scenario,
+              '--uri',
+              config.uri,
+              '--db',
+              config.database,
+              '--viewer',
+              viewer,
+            ],
+            {
+              cwd: repoRoot,
+              stdio: ['ignore', 'pipe', 'pipe'],
+              windowsHide: true,
+            },
           );
+          child = current;
+          current.once('spawn', () => {
+            state = 'running';
+            reply(202, { started: true, scenario, jobId });
+          });
+          current.once('error', () => {
+            state = 'failed';
+            lastLine =
+              'Could not launch the scenario feeder. Check Node and run pnpm install.';
+            if (child === current) child = undefined;
+            reply(500, { error: lastLine });
+          });
           const keep = (chunk: Buffer) => {
             const lines = chunk.toString().trim().split('\n');
-            lastLine = lines[lines.length - 1] ?? lastLine;
+            lastLine = (lines.at(-1) ?? lastLine).slice(-1000);
           };
-          child.stdout?.on('data', keep);
-          child.stderr?.on('data', keep);
-          child.on('exit', () => (child = undefined));
-          reply(202, { started: true, scenario });
+          current.stdout?.on('data', keep);
+          current.stderr?.on('data', keep);
+          current.once('close', (code) => {
+            if (jobId !== currentJobId) return;
+            if (child === current) child = undefined;
+            if (state !== 'failed') state = code === 0 ? 'completed' : 'failed';
+            if (code !== 0 && !lastLine)
+              lastLine = 'Scenario feeder stopped before completion.';
+          });
         });
       });
     },

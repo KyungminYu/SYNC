@@ -57,28 +57,44 @@ interface Scenario {
 }
 
 /** Groups runs by scenario id; runs with other names are ignored. */
-function scenariosOf(runs: RunRow[]): Scenario[] {
+export function scenariosOf(runs: RunRow[], completedOnly = false): Scenario[] {
   const byId = new Map<string, Scenario>();
   for (const run of runs) {
     const p = parseRunName(run.name);
     if (!p) continue;
-    const s = byId.get(p.scenario) ?? { id: p.scenario, load: p.load, n: p.n, runs: {} };
+    const groupKey = `${p.scenario}:${p.batch ?? 'legacy'}`;
+    const s = byId.get(groupKey) ?? {
+      id: p.scenario,
+      load: p.load,
+      n: p.n,
+      runs: {},
+    };
     // Keep the newest run if a name repeats.
     const old = s.runs[p.policy];
     if (!old || old.id < run.id) s.runs[p.policy] = run;
-    byId.set(p.scenario, s);
+    byId.set(groupKey, s);
   }
-  return [...byId.values()].sort(
+  const latest = new Map<string, Scenario>();
+  for (const s of byId.values()) {
+    if (completedOnly && !done(s)) continue;
+    const old = latest.get(s.id);
+    if (!old || newestId(s) > newestId(old)) latest.set(s.id, s);
+  }
+  return [...latest.values()].sort(
     (a, b) =>
-      LOADS.indexOf(a.load as never) - LOADS.indexOf(b.load as never) || a.n - b.n,
+      LOADS.indexOf(a.load as never) - LOADS.indexOf(b.load as never) ||
+      a.n - b.n,
   );
 }
 
 const done = (s: Scenario) =>
-  s.runs.baseline?.status === 'completed' && s.runs.sync?.status === 'completed';
+  s.runs.baseline?.status === 'completed' &&
+  s.runs.sync?.status === 'completed';
 /** Highest run id in a scenario: the most recently created one. */
 const newestId = (s: Scenario) =>
-  [s.runs.baseline?.id ?? 0n, s.runs.sync?.id ?? 0n].reduce((a, b) => (a > b ? a : b));
+  [s.runs.baseline?.id ?? 0n, s.runs.sync?.id ?? 0n].reduce((a, b) =>
+    a > b ? a : b,
+  );
 
 export class SpacetimeSyncSource implements SyncSource {
   readonly origin = 'live' as const;
@@ -131,7 +147,11 @@ export class SpacetimeSyncSource implements SyncSource {
               current() &&
               this.set({
                 ...this.snapshot,
-                status: { kind: 'disconnected', reason: 'Subscription failed.' },
+                status: {
+                  kind: 'disconnected',
+                  reason:
+                    'Database schema/subscription mismatch. Publish the current SYNC module, regenerate bindings, then retry.',
+                },
               }),
           )
           .subscribe(QUERIES);
@@ -144,7 +164,10 @@ export class SpacetimeSyncSource implements SyncSource {
           db.uiWorkers,
           db.uiDecisions,
           db.uiMetrics,
-        ] as Array<{ onInsert(cb: () => void): void; onDelete(cb: () => void): void }>) {
+        ] as Array<{
+          onInsert(cb: () => void): void;
+          onDelete(cb: () => void): void;
+        }>) {
           table.onInsert(() => current() && this.schedule());
           table.onDelete(() => current() && this.schedule());
         }
@@ -156,7 +179,7 @@ export class SpacetimeSyncSource implements SyncSource {
             ...this.snapshot,
             status: {
               kind: 'disconnected',
-              reason: `Cannot reach SpacetimeDB at ${env.VITE_SPACETIMEDB_URI} (${error.message}). Is the local database running (pnpm db:start)?`,
+              reason: `Cannot reach SpacetimeDB at ${env.VITE_SPACETIMEDB_URI} (${error.message}). Check the configured server and publish the current SYNC module.`,
             },
           }),
       )
@@ -167,7 +190,8 @@ export class SpacetimeSyncSource implements SyncSource {
             ...this.snapshot,
             status: {
               kind: 'disconnected',
-              reason: 'Lost the connection to SpacetimeDB. The last tick stays on screen.',
+              reason:
+                'Lost the connection to SpacetimeDB. The last tick stays on screen.',
             },
           }),
       )
@@ -180,6 +204,8 @@ export class SpacetimeSyncSource implements SyncSource {
     this.timer = undefined;
     const conn = this.conn;
     this.conn = undefined;
+    this.known = undefined;
+    this.decisions.clear();
     conn?.disconnect();
   }
 
@@ -214,8 +240,10 @@ export class SpacetimeSyncSource implements SyncSource {
     const conn = this.conn;
     if (!conn) return;
     const db = conn.db;
-    let scenarios = scenariosOf([...db.uiRuns.iter()] as RunRow[]);
-    if (this.mode === 'stored') scenarios = scenarios.filter(done);
+    const scenarios = scenariosOf(
+      [...db.uiRuns.iter()] as RunRow[],
+      this.mode === 'stored',
+    );
     // Live: a scenario with newer runs than before was just (re)started; show it.
     if (this.mode === 'live') {
       const fresh = this.known
@@ -229,6 +257,9 @@ export class SpacetimeSyncSource implements SyncSource {
       scenarios.find((s) => s.id === this.picked) ??
       [...scenarios].sort((a, b) => (newestId(a) < newestId(b) ? 1 : -1))[0];
 
+    const visible = new Set([...db.uiRuns.iter()].map((r) => String(r.id)));
+    for (const id of this.decisions.keys())
+      if (!visible.has(id)) this.decisions.delete(id);
     const orders = [...db.uiOrders.iter()];
     const tasks = [...db.uiTasks.iter()];
     const workers = [...db.uiWorkers.iter()];

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Identity } from 'spacetimedb';
 import type { DbConnection } from '../../packages/bindings/src';
 import type { ScenarioCustomer } from '../../apps/web/src/sync/scenarioCatalog';
@@ -10,7 +11,7 @@ import { runName, type Load } from '../../apps/web/src/sync/live/scenarioNames';
  * Used by scripts/feed-scenario.ts; the dashboard itself never writes.
  *
  * Creates two deterministic runs with the same customers — "Baseline" on fcfs
- * and "SYNC" on sync_greedy — and owns their clock: both runs stay paused and
+ * and "SYNC" on primal_dual — and owns their clock: both runs stay paused and
  * are stepped one tick (= one scenario second) at a time, so every customer
  * reaches both shops at exactly the same tick. Each drink is one engine order;
  * a customer's drinks share a cart key ("c7:latte+black_coffee").
@@ -61,9 +62,10 @@ async function until<T>(read: () => T | undefined, what: string): Promise<T> {
  */
 export async function driveScenario(conn: DbConnection, o: DriveOptions) {
   const { seed, signal, log = () => {} } = o;
+  const batch = randomUUID();
   const runs = [
-    { name: runName(o.load, o.n, 'baseline'), policy: 'fcfs' },
-    { name: runName(o.load, o.n, 'sync'), policy: 'sync_greedy' },
+    { name: runName(o.load, o.n, 'baseline', batch), policy: 'fcfs' },
+    { name: runName(o.load, o.n, 'sync', batch), policy: 'primal_dual' },
   ] as const;
   // The engine allows 10 runs per owner and only reports a generic error when
   // the limit is hit, so check first. Runs this identity controls = owned runs.
@@ -72,6 +74,21 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
     throw new Error(
       `this browser identity already owns ${owned} of the engine's ${OWNER_RUN_LIMIT} runs, so a new Baseline/SYNC pair cannot be created. Use Sample mode to replay saved runs.`,
     );
+  const drinks = o.customers.reduce((n, c) => n + c.items.length, 0);
+  if (!drinks || drinks > 100)
+    throw new Error('Scenario must contain 1�100 drinks per shop.');
+  if (
+    o.customers.some(
+      (c) =>
+        !Number.isFinite(c.arrival) ||
+        c.arrival < 0 ||
+        !c.items.length ||
+        c.items.some((i) => !menuByName(i.name)),
+    )
+  )
+    throw new Error('Invalid scenario customer or menu item.');
+  if (new Set(o.customers.map((c) => c.id)).size !== o.customers.length)
+    throw new Error('Duplicate scenario customer id.');
   const ids: bigint[] = [];
   for (const r of runs) {
     if (signal?.aborted) return;
@@ -84,7 +101,10 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
       budgetMicrousd: undefined,
     });
     const run = await until(
-      () => [...conn.db.uiRuns.iter()].find((x) => !before.has(x.id) && x.name === r.name),
+      () =>
+        [...conn.db.uiRuns.iter()].find(
+          (x) => !before.has(x.id) && x.name === r.name,
+        ),
       `run "${r.name}"`,
     );
     await conn.reducers.setPolicy({
@@ -104,9 +124,13 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
   o.onRuns?.({ baseline: ids[0], sync: ids[1] });
 
   // Customers reach the counter WALK_IN s after the door; that is when they order.
-  const arrivals = o.customers.map((c) => ({ ...c, tick: Math.round(c.arrival) + WALK_IN }));
+  const arrivals = o.customers.map((c) => ({
+    ...c,
+    tick: Math.round(c.arrival) + WALK_IN,
+  }));
   const lastArrival = Math.max(...arrivals.map((c) => c.tick));
-  const status = (id: bigint) => [...conn.db.uiRuns.iter()].find((r) => r.id === id);
+  const status = (id: bigint) =>
+    [...conn.db.uiRuns.iter()].find((r) => r.id === id);
   let closed = false;
   for (let tick = 0; !signal?.aborted; tick++) {
     const started = Date.now();
@@ -134,8 +158,24 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
     const open = ids.filter((id) => status(id)?.status !== 'completed');
     if (!open.length) break;
     for (const runId of open) await conn.reducers.stepRun({ runId });
+    await until(
+      () =>
+        open.every((id) => {
+          const r = status(id);
+          return r && (r.status === 'completed' || r.tick >= tick + 1);
+        })
+          ? true
+          : undefined,
+      'scenario tick',
+    );
+    if (tick > lastArrival + 10000)
+      throw new Error(
+        'Scenario stalled: inspect resource availability, budget, and task states.',
+      );
     if (tick % 30 === 0)
-      log(`tick ${tick}: ${ids.map((id) => `${id}=${status(id)?.status}`).join(' ')}`);
+      log(
+        `tick ${tick}: ${ids.map((id) => `${id}=${status(id)?.status}`).join(' ')}`,
+      );
     await sleep(Math.max(0, (o.tickMs ?? 200) - (Date.now() - started)));
   }
   return { baseline: ids[0], sync: ids[1] };

@@ -4,9 +4,12 @@ The authoritative coffee-shop module is in `spacetimedb/src`. The previous kitch
 
 ## Start here
 
+- [Live scenario repair and Maincloud migration](docs/LIVE_SCENARIO_REPAIR.md): Windows launcher fix, shared environment configuration, scenario validation, and publication commands.
+
 - [Integration handoff](docs/INTEGRATION_HANDOFF.md): generated names, subscription flow, service responsibilities, and outstanding work.
 - [Schema and UI contract](docs/SCHEMA_AND_UI.md): fields, identity rules, keys, and UI view semantics.
-- [Policies and recovery](docs/POLICIES.md): six policies, invariants, permissions, budgets, and reconciliation.
+- [Primal-dual engine](docs/PRIMAL_DUAL.md): rolling execution, dynamic constraints, and the planner subscription contract.
+- [Policies and recovery](docs/POLICIES.md): baseline policies, invariants, permissions, budgets, and reconciliation.
 - [Local validation](docs/VALIDATION.md): checks actually performed against this workspace.
 
 ## Setup
@@ -34,9 +37,9 @@ Agent placeholder: `http://127.0.0.1:3001/health` returns liveness; `/ready` del
 
 ## Database responsibilities
 
-The module owns 15 private base/schedule tables, ten caller-filtered UI views, a static policy catalog, and a service-only job view. It models black-coffee/latte DAGs, seven workers, station capacities 2/2/2/1, order-owned trays, budgets, job claims, attempts, and retained events. Scheduled callbacks advance logical ticks every 200 ms while running.
+The module owns private execution and planner tables, caller-filtered UI views, a static policy catalog, and a service-only job view. It models black-coffee/latte DAGs, seven workers, station capacities 2/2/2/1, order-owned trays, budgets, job claims, attempts, and retained events. Scheduled callbacks advance logical ticks every 200 ms while running.
 
-Policies: `fcfs`, `earliest_finish`, `minimum_slack`, `critical_path`, `sync_greedy`, `bounded_joint`. There are no automatic seeded orders or invented performance metrics. Deterministic mode is the new module's actual execution mode, not a removed client mock. Recipe durations and costs remain illustrative modeled values as documented in the supplied module.
+Policies: `fcfs`, `earliest_finish`, `minimum_slack`, `critical_path`, `sync_greedy`, `bounded_joint`, `primal_dual`. There are no automatic seeded orders or invented performance metrics. Deterministic mode is the new module's actual execution mode, not a removed client mock. Recipe durations and costs remain illustrative modeled values as documented in the supplied module.
 
 ## Developer commands
 

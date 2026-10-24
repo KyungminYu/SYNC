@@ -11,7 +11,7 @@ export interface ScenarioRunner {
   readonly scenarios: readonly ScenarioOption[];
   /**
    * Runs one scenario (again). `viewer` is the identity the dashboard reads
-   * as, so the new runs are shared with it. Resolves once the run is accepted.
+   * as, so the new runs are shared with it. Resolves when execution completes; rejects on launch or execution failure.
    */
   start(id: string, viewer: string): Promise<void>;
 }

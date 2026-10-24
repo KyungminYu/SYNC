@@ -1,4 +1,8 @@
 import {
+  RollingHorizonEngine,
+  planningFingerprint,
+} from './rollingHorizonEngine.ts';
+import {
   plan,
   validatePolicyConfig,
   DEFAULT_POLICY_CONFIG,
@@ -57,6 +61,7 @@ export function emit(
 export function emptyState(run: Run): State {
   return {
     run,
+    planner: [],
     members: [],
     carts: [],
     recipes: [],
@@ -436,7 +441,10 @@ function admit(s: State, a: Assignment, policy: string): void {
     throw new Error('INVALID_ASSIGNMENT');
   if (blockedReason(s, t) !== 'eligible') throw new Error('NOT_ELIGIBLE');
   const reqs = s.requirements.filter((r) => r.taskId === t.id);
-  if (reqs.some((r) => freeUnits(s, r.resourceId) < r.units))
+  const totals = new Map<bigint, number>();
+  for (const r of reqs)
+    totals.set(r.resourceId, (totals.get(r.resourceId) ?? 0) + r.units);
+  if ([...totals].some(([id, units]) => freeUnits(s, id) < units))
     throw new Error('RESOURCE_CONFLICT');
   if (
     s.run.budgetMicrousd !== undefined &&
@@ -522,7 +530,20 @@ function admit(s: State, a: Assignment, policy: string): void {
 export function schedule(s: State): void {
   if (s.run.status !== 'running') return;
   const config = readPolicy(s);
-  const proposal = plan(snapshot(s), config);
+  const frontier = snapshot(s);
+  if (config.policy === 'primal_dual') {
+    const forecast = new RollingHorizonEngine().plan(s);
+    if (!forecast) return;
+    for (const a of forecast.filter((a) => a.startTick === s.run.tick))
+      admit(s, a, 'primal_dual');
+    s.planner[0]!.fingerprint = planningFingerprint(s);
+    s.run.version++;
+    assertInvariants(s);
+    return;
+  }
+  // Switching away invalidates warm state and forecasts for the prior policy.
+  s.planner = [];
+  const proposal = plan(frontier, config);
   for (const a of proposal) admit(s, a, config.policy ?? 'sync_greedy');
   s.run.version++;
   assertInvariants(s);
@@ -868,4 +889,41 @@ export function closeArrivals(s: State, actor: Principal): void {
     s.run.status = 'completed';
     emit(s, 'run_completed', 'All admitted orders delivered and cleaned.');
   }
+}
+
+export function setCapacity(
+  s: State,
+  actor: Principal,
+  resourceId: bigint,
+  capacity: number,
+): void {
+  requireControl(s, actor);
+  assertInteger(capacity, 0, 1000000, 'CAPACITY');
+  const resource = s.resources.find((r) => r.id === resourceId);
+  if (!resource) throw new Error('RESOURCE_NOT_FOUND');
+  const held = s.reservations
+    .filter((r) => r.resourceId === resourceId)
+    .reduce((sum, r) => sum + r.units, 0);
+  if (capacity < held) throw new Error('CAPACITY_BELOW_RESERVATIONS');
+  resource.capacity = capacity;
+  s.run.version++;
+  emit(s, 'capacity_changed', resourceId.toString());
+  schedule(s);
+}
+export function setBudget(
+  s: State,
+  actor: Principal,
+  budgetMicrousd: bigint | undefined,
+): void {
+  requireControl(s, actor);
+  if (
+    budgetMicrousd !== undefined &&
+    (budgetMicrousd < s.run.modeledSpentMicrousd + s.run.reservedMicrousd ||
+      budgetMicrousd > 18446744073709551615n)
+  )
+    throw new Error('INVALID_BUDGET');
+  s.run.budgetMicrousd = budgetMicrousd;
+  s.run.version++;
+  emit(s, 'budget_changed', budgetMicrousd?.toString() ?? 'unlimited');
+  schedule(s);
 }

@@ -9,7 +9,8 @@ export type PolicyName =
   | 'minimum_slack'
   | 'critical_path'
   | 'sync_greedy'
-  | 'bounded_joint';
+  | 'bounded_joint'
+  | 'primal_dual';
 export interface ResourceRequirement {
   resourceId: bigint;
   units: number;
@@ -95,6 +96,7 @@ const POLICY_NAMES: readonly PolicyName[] = [
   'critical_path',
   'sync_greedy',
   'bounded_joint',
+  'primal_dual',
 ];
 function nonnegative(value: number, label: string): void {
   if (!Number.isFinite(value) || value < 0) {
@@ -440,6 +442,7 @@ function joint(
         (reason) => reason !== 'sync_greedy' && reason !== 'bounded_joint',
       ),
       'bounded_joint',
+      'primal_dual',
       branches >= config.maxBranches
         ? 'search_budget_reached'
         : 'candidate_search_completed',
@@ -459,6 +462,8 @@ export function plan(
 ): Assignment[] {
   const config: PolicyConfig = { ...DEFAULT_POLICY_CONFIG, ...options };
   validatePolicyConfig(config);
+  if (config.policy === 'primal_dual')
+    throw new Error('Use RollingHorizonEngine for primal_dual');
   validateSnapshot(snapshot);
   const pairs = candidatePairs(snapshot, config);
   return config.policy === 'bounded_joint'

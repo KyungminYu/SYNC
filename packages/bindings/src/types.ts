@@ -133,6 +133,24 @@ export const SyncOrders = __t.object("SyncOrders", {
 });
 export type SyncOrders = __Infer<typeof SyncOrders>;
 
+export const SyncPlanner = __t.object("SyncPlanner", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  fingerprint: __t.string(),
+  lastPlanTick: __t.u32(),
+  nextWakeTick: __t.u32(),
+  replanCount: __t.u64(),
+  snapshotVersion: __t.u64(),
+  trigger: __t.string(),
+  objective: __t.f64(),
+  candidateCount: __t.u32(),
+  candidateLimitReached: __t.bool(),
+  pricesJson: __t.string(),
+  planJson: __t.string(),
+});
+export type SyncPlanner = __Infer<typeof SyncPlanner>;
+
 export const SyncRecipes = __t.object("SyncRecipes", {
   key: __t.string(),
   id: __t.u64(),
@@ -372,6 +390,26 @@ export type UiOrderPayload = __Infer<typeof UiOrderPayload>;
 
 export const UiOrders = __t.object("UiOrders", {});
 export type UiOrders = __Infer<typeof UiOrders>;
+
+export const UiPlanner = __t.object("UiPlanner", {});
+export type UiPlanner = __Infer<typeof UiPlanner>;
+
+export const UiPlannerPayload = __t.object("UiPlannerPayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  lastPlanTick: __t.u32(),
+  nextWakeTick: __t.u32(),
+  replanCount: __t.u64(),
+  snapshotVersion: __t.u64(),
+  trigger: __t.string(),
+  objective: __t.f64(),
+  candidateCount: __t.u32(),
+  candidateLimitReached: __t.bool(),
+  pricesJson: __t.string(),
+  planJson: __t.string(),
+});
+export type UiPlannerPayload = __Infer<typeof UiPlannerPayload>;
 
 export const UiPolicyCatalog = __t.object("UiPolicyCatalog", {});
 export type UiPolicyCatalog = __Infer<typeof UiPolicyCatalog>;

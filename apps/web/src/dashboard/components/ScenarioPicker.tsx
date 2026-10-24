@@ -61,7 +61,7 @@ export function ScenarioPicker({
   /** Run / Rerun label; a running scenario cannot be started again. */
   const action = (o: ScenarioOption) =>
     run.busy === o.id
-      ? 'Starting…'
+      ? 'Running…'
       : o.meta?.startsWith('running')
         ? '…'
         : o.disabled
@@ -96,7 +96,7 @@ export function ScenarioPicker({
                   className="picker-row"
                   role="option"
                   aria-selected={o.id === value}
-                  aria-disabled={o.disabled}
+                  aria-disabled={onRun ? undefined : o.disabled}
                 >
                   <button
                     className="pick"
@@ -111,14 +111,16 @@ export function ScenarioPicker({
                     </span>
                     <span className="picker-text">
                       <span className="label">{o.label}</span>
-                      {o.detail && <span className="picker-detail">{o.detail}</span>}
+                      {o.detail && (
+                        <span className="picker-detail">{o.detail}</span>
+                      )}
                     </span>
                     {o.meta && <span className="meta">{o.meta}</span>}
                   </button>
                   {onRun && (
                     <button
                       className="run"
-                      disabled={!!run.busy || o.meta?.startsWith('running')}
+                      disabled={!!run.busy}
                       onClick={() => {
                         setRun({ busy: o.id });
                         onRun(o.id).then(
@@ -126,7 +128,10 @@ export function ScenarioPicker({
                             setRun({});
                             setOpen(false);
                           },
-                          (e: Error) => setRun({ error: e.message }),
+                          (e: Error) => {
+                            setRun({ error: e.message });
+                            setOpen(true);
+                          },
                         );
                       }}
                     >

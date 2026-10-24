@@ -1,5 +1,7 @@
 export { db as default } from './tables.ts';
 export {
+  set_resource_capacity,
+  set_modeled_budget,
   create_run,
   grant_member,
   set_run_status,
@@ -16,6 +18,7 @@ export {
   report_usage,
 } from './runtime/reducers.ts';
 export {
+  ui_planner,
   ui_runs,
   ui_orders,
   ui_tasks,

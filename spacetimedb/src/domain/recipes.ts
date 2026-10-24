@@ -9,9 +9,9 @@
  * set the corresponding order condition before admitting collect_tray.
  */
 export const ROLE_CAPACITIES = {
-  cashier: 2,
-  barista: 2,
-  server: 2,
+  cashier: 1,
+  barista: 1,
+  server: 1,
   cleaner: 1,
 } as const;
 export type Role = keyof typeof ROLE_CAPACITIES;

@@ -74,6 +74,12 @@ it('executes a complete reducer lifecycle and releases reservations', () => {
       customerUseTicks: 2,
     }),
   );
+  test.withReducerTx(alice, (ctx) =>
+    api.set_policy(ctx, {
+      runId,
+      configJson: JSON.stringify({ policy: 'primal_dual' }),
+    }),
+  );
   test.withReducerTx(alice, (ctx) => api.close_arrivals(ctx, { runId }));
   for (
     let i = 0;
@@ -88,6 +94,12 @@ it('executes a complete reducer lifecycle and releases reservations', () => {
       .every((r) => r.reserved_units === 0),
   ).toBe(true);
   expect(api.ui_metrics(test.viewContext(alice))[0]!.delivered_orders).toBe(1);
+  expect(
+    api.ui_planner(test.viewContext(alice))[0]!.replan_count,
+  ).toBeGreaterThan(0n);
+  expect(api.ui_planner(test.viewContext(principal('outsider', 3n)))).toEqual(
+    [],
+  );
 });
 it('rolls back previously successful writes in a failed transaction', () => {
   const test = createModuleTestHarness(schema, api);

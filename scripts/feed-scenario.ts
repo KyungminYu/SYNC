@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
+import { databaseConfig } from './lib/databaseConfig.mjs';
 /**
  * Scenario feeder (test data source; the dashboard only reads the database).
  * Plays one fixed scenario (apps/web/src/sync/scenarioCatalog.ts) into the
  * local SpacetimeDB engine as runs "{id} · Baseline" (fcfs) and "{id} · SYNC"
- * (sync_greedy). Design: design/LIVE_SPACETIMEDB_DESIGN.md §7.
+ * (primal_dual). Design: design/LIVE_SPACETIMEDB_DESIGN.md §7.
  *
  *   corepack pnpm feed --scenario Mid-2 [--viewer <identity hex>]
  *                      [--db sync-coffee-live] [--trays 12] [--ms 200]
@@ -16,10 +18,20 @@
  * owner: when the next pair would not fit, the feeder starts over as a new
  * identity (older runs and their viewer grants stay).
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+} from 'node:fs';
 import { DbConnection } from '../packages/bindings/src';
 import { simulate } from '../apps/web/src/sync/mock/scenario';
-import { applyScenario, scenarioById, SCENARIOS } from '../apps/web/src/sync/scenarioCatalog';
+import {
+  applyScenario,
+  scenarioById,
+  SCENARIOS,
+} from '../apps/web/src/sync/scenarioCatalog';
 import { driveScenario } from './lib/driveScenario';
 
 /** --name value flags with defaults. */
@@ -32,21 +44,34 @@ const SEED = 5;
 const trays = Number(flag('trays', '12'));
 /** Wall-clock ms per tick: 200 ms = 5× real time (same as the engine clock). */
 const tickMs = Number(flag('ms', '200'));
-const uri = flag('uri', process.env.VITE_SPACETIMEDB_URI ?? 'http://127.0.0.1:3000');
-const database = flag('db', process.env.VITE_SPACETIMEDB_DATABASE ?? 'sync-coffee-live');
+const config = databaseConfig();
+const uri = flag('uri', config.uri);
+const database = flag('db', config.database);
+if (!Number.isInteger(trays) || trays < 1 || trays > 20)
+  throw new Error('--trays must be 1�20');
+if (!Number.isInteger(tickMs) || tickMs < 0 || tickMs > 60000)
+  throw new Error('--ms must be 0�60000');
 const scenario = scenarioById(flag('scenario', ''));
 if (!scenario)
-  throw new Error(`--scenario must be one of ${SCENARIOS.map((s) => s.id).join(', ')}`);
+  throw new Error(
+    `--scenario must be one of ${SCENARIOS.map((s) => s.id).join(', ')}`,
+  );
 
 mkdirSync('.local', { recursive: true });
-const TOKEN_FILE = '.local/feeder-token';
-const VIEWERS_FILE = '.local/feeder-viewers';
+const scope = createHash('sha256')
+  .update(`${uri}/${database}`)
+  .digest('hex')
+  .slice(0, 24);
+const TOKEN_FILE = `.local/feeder-${scope}-token`;
+const VIEWERS_FILE = `.local/feeder-${scope}-viewers`;
 const viewers = new Set(
   existsSync(VIEWERS_FILE)
     ? readFileSync(VIEWERS_FILE, 'utf8').split('\n').filter(Boolean)
     : [],
 );
 const newViewer = flag('viewer', '');
+if (newViewer && !/^[0-9a-f]{64}$/i.test(newViewer))
+  throw new Error('Invalid viewer identity');
 if (newViewer) {
   viewers.add(newViewer.toLowerCase());
   writeFileSync(VIEWERS_FILE, [...viewers].join('\n') + '\n');
@@ -55,11 +80,17 @@ if (newViewer) {
 /** Connects with the stored feeder identity and subscribes to the runs view. */
 function connect() {
   return new Promise<DbConnection>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`No answer from ${uri}`)), 10000);
-    DbConnection.builder()
+    let connection: DbConnection | undefined;
+    const timer = setTimeout(() => {
+      connection?.disconnect();
+      reject(new Error('Database connection timed out'));
+    }, 10000);
+    connection = DbConnection.builder()
       .withUri(uri)
       .withDatabaseName(database)
-      .withToken(existsSync(TOKEN_FILE) ? readFileSync(TOKEN_FILE, 'utf8') : undefined)
+      .withToken(
+        existsSync(TOKEN_FILE) ? readFileSync(TOKEN_FILE, 'utf8') : undefined,
+      )
       .onConnect((conn, _identity, token) => {
         writeFileSync(TOKEN_FILE, token, { mode: 0o600 });
         conn
@@ -68,8 +99,15 @@ function connect() {
             clearTimeout(timer);
             resolve(conn);
           })
-          .onError((ctx) => reject(ctx.event))
-          .subscribe(['SELECT * FROM ui_runs']);
+          .onError((ctx) => {
+            clearTimeout(timer);
+            conn.disconnect();
+            reject(ctx.event);
+          })
+          .subscribe([
+            'SELECT * FROM ui_runs',
+            'SELECT * FROM ui_policy_catalog',
+          ]);
       })
       .onConnectError((_ctx, error) => {
         clearTimeout(timer);
@@ -81,40 +119,70 @@ function connect() {
 
 /** Runs one owner may have (engine `create_run` limit). */
 const OWNER_RUN_LIMIT = 10;
-let conn = await connect();
-// Two more runs must fit under the owner limit; otherwise start as a new identity.
-if ([...conn.db.uiRuns.iter()].filter((r) => r.canControl).length + 2 > OWNER_RUN_LIMIT) {
-  console.log('feeder identity owns 10 runs: switching to a new identity');
-  conn.disconnect();
-  rmSync(TOKEN_FILE, { force: true });
-  conn = await connect();
-}
-console.log(`feeder identity ${conn.identity!.toHexString()}`);
+async function main() {
+  let conn = await connect();
+  if (
+    ![...conn.db.uiPolicyCatalog.iter()].some((p) => p.name === 'primal_dual')
+  ) {
+    conn.disconnect();
+    throw new Error(
+      'Database module is out of date: publish the current module with primal_dual before starting scenarios.',
+    );
+  }
+  // Two more runs must fit under the owner limit; otherwise start as a new identity.
+  if (
+    [...conn.db.uiRuns.iter()].filter((r) => r.canControl).length + 2 >
+    OWNER_RUN_LIMIT
+  ) {
+    console.log('feeder identity owns 10 runs: switching to a new identity');
+    conn.disconnect();
+    rmSync(TOKEN_FILE, { force: true });
+    conn = await connect();
+  }
+  console.log(`feeder identity ${conn.identity!.toHexString()}`);
 
-if (!viewers.size)
-  console.log('no --viewer given: only this feeder identity can see the runs');
-// The scenario's customers: the mock's (same seed) with its lever applied.
-const customers = applyScenario(
-  scenario,
-  simulate('baseline', { seed: SEED }).jobs.map((job) => ({
-    id: job.id,
-    arrival: job.arrival,
-    items: job.items,
-  })),
-);
-console.log(
-  `${scenario.id} (${scenario.description}): ${customers.length} customers, ${customers.reduce((k, c) => k + c.items.length, 0)} drinks`,
-);
-const ids = await driveScenario(conn, {
-  seed: SEED,
-  load: scenario.load,
-  n: scenario.n,
-  customers,
-  trays,
-  tickMs,
-  viewers: [...viewers],
-  log: console.log,
+  if (!viewers.size)
+    console.log(
+      'no --viewer given: only this feeder identity can see the runs',
+    );
+  // The scenario's customers: the mock's (same seed) with its lever applied.
+  const customers = applyScenario(
+    scenario,
+    simulate('baseline', { seed: SEED }).jobs.map((job) => ({
+      id: job.id,
+      arrival: job.arrival,
+      items: job.items,
+    })),
+  );
+  console.log(
+    `${scenario.id} (${scenario.description}): ${customers.length} customers, ${customers.reduce((k, c) => k + c.items.length, 0)} drinks`,
+  );
+  try {
+    const ids = await driveScenario(conn, {
+      seed: SEED,
+      load: scenario.load,
+      n: scenario.n,
+      customers,
+      trays,
+      tickMs,
+      viewers: [...viewers],
+      log: console.log,
+    });
+    console.log(
+      `done: ${scenario.id} runs ${ids?.baseline} and ${ids?.sync} completed`,
+    );
+  } catch (error) {
+    console.error(
+      `Scenario failed: ${error instanceof Error ? error.message : 'Database operation failed'}. Check pnpm db:logs and publish the latest module.`,
+    );
+    process.exitCode = 1;
+  } finally {
+    conn.disconnect();
+  }
+}
+main().catch(() => {
+  console.error(
+    'Scenario failed: cannot connect or subscribe to the configured database. Check the server URL and publish the current module (ui_runs and ui_policy_catalog are required).',
+  );
+  process.exitCode = 1;
 });
-console.log(`done: ${scenario.id} runs ${ids?.baseline} and ${ids?.sync} completed`);
-conn.disconnect();
-process.exit(0);

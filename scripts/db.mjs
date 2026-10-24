@@ -1,3 +1,6 @@
+import { databaseConfig } from './lib/databaseConfig.mjs';
+const needsTarget = ['publish', 'logs', 'describe'].includes(process.argv[2]);
+const config = needsTarget ? databaseConfig() : { database: '', httpUri: '' };
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { generateKeyPairSync } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -33,15 +36,24 @@ const args = {
   ],
   publish: [
     'publish',
-    'sync-coffee-dev',
+    config.database,
     '--server',
-    'http://127.0.0.1:3000',
+    config.httpUri,
     '--module-path',
     'spacetimedb',
     '--yes=skip-login',
     '--delete-data=never',
   ],
-  logs: ['logs', 'sync-coffee-dev', '--server', 'http://127.0.0.1:3000'],
+  logs: ['logs', config.database, '--server', config.httpUri],
+  login: ['login'],
+  describe: [
+    'describe',
+    config.database,
+    '--server',
+    config.httpUri,
+    '--anonymous',
+    '--json',
+  ],
   start: [
     'start',
     '--listen-addr',
@@ -52,6 +64,10 @@ const args = {
   ],
 }[command];
 if (!args) throw new Error('Unknown database command');
+if (command === 'publish' && process.argv.includes('--break-clients'))
+  args.push('--break-clients');
+if (['publish', 'logs', 'describe'].includes(command))
+  console.error(`Database target: ${config.httpUri} / ${config.database}`);
 const executable =
   command === 'start' && local
     ? resolve('.tools/spacetime/spacetimedb-standalone.exe')

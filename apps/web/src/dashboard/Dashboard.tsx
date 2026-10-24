@@ -66,7 +66,7 @@ export function Dashboard({
     setSelected(undefined);
     if (source.delivery === 'replay') playback.seek(0);
     else if (!live) playback.seek(end);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on scenario change
+    // Reset only on scenario change; playback ticks must not reset the selection.
   }, [scenarioId]);
 
   const t = playback.t;

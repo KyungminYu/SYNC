@@ -2,6 +2,8 @@ import { t } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
 import { db, clock } from '../tables.ts';
 import {
+  setCapacity,
+  setBudget,
   createState,
   addOrder,
   setMember,
@@ -309,3 +311,31 @@ export const close_arrivals = db.reducer({ runId: t.u64() }, (ctx, args) => {
   closeArrivals(s, { identityHex: ctx.sender.toHexString() });
   save(store, s);
 });
+
+export const set_resource_capacity = db.reducer(
+  { runId: t.u64(), resourceId: t.u64(), capacity: t.u32() },
+  (ctx, args) => {
+    const store = ctx.db as unknown as MutableDb;
+    const s = load(store, args.runId);
+    setCapacity(
+      s,
+      { identityHex: ctx.sender.toHexString() },
+      args.resourceId,
+      args.capacity,
+    );
+    save(store, s);
+  },
+);
+export const set_modeled_budget = db.reducer(
+  { runId: t.u64(), budgetMicrousd: t.option(t.u64()) },
+  (ctx, args) => {
+    const store = ctx.db as unknown as MutableDb;
+    const s = load(store, args.runId);
+    setBudget(
+      s,
+      { identityHex: ctx.sender.toHexString() },
+      args.budgetMicrousd,
+    );
+    save(store, s);
+  },
+);

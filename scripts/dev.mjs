@@ -1,17 +1,20 @@
 import concurrently from 'concurrently';
+import { databaseConfig } from './lib/databaseConfig.mjs';
+const config = databaseConfig();
 try {
   const r = await fetch(
-    'http://127.0.0.1:3000/v1/database/sync-coffee-dev/identity',
+    `${config.httpUri}/v1/database/${config.database}/identity`,
+    { signal: globalThis.AbortSignal.timeout(10000) },
   );
   if (!r.ok) throw new Error('Database not published');
 } catch {
   console.error(
-    'Start SpacetimeDB in another terminal: pnpm db:start\nThen publish once: pnpm db:publish\nThen retry pnpm dev.',
+    'Configured database is unavailable. Check .env, authenticate with pnpm db:login, and publish with pnpm db:publish. For a local server first run pnpm db:start.',
   );
   process.exit(1);
 }
 console.log(
-  'Database available. UI and agent integration placeholders are starting.',
+  'Configured database available. Starting dashboard and agent service.',
 );
 const { result } = concurrently(
   [

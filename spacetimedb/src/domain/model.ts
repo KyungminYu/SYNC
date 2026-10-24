@@ -173,7 +173,21 @@ export type Telemetry = Base & {
   wallMilliseconds: number;
   reporterIdentityHex: string;
 };
+export type Planner = Base & {
+  fingerprint: string;
+  lastPlanTick: number;
+  nextWakeTick: number;
+  replanCount: bigint;
+  snapshotVersion: bigint;
+  trigger: string;
+  objective: number;
+  candidateCount: number;
+  candidateLimitReached: boolean;
+  pricesJson: string;
+  planJson: string;
+};
 export type State = {
+  planner: Planner[];
   run: Run;
   members: Member[];
   carts: Cart[];
@@ -195,6 +209,7 @@ export type Principal = {
   identityHex: string;
 };
 export const STATE_TABLES = [
+  'planner',
   'members',
   'carts',
   'recipes',

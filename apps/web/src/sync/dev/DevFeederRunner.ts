@@ -24,5 +24,31 @@ export class DevFeederRunner implements ScenarioRunner {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(body.error ?? `Feeder request failed (${res.status}).`);
     }
+    const { jobId } = (await res.json()) as { jobId: number };
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const statusResponse = await fetch('/__dev/feed', {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!statusResponse.ok)
+        throw new Error(
+          'Cannot read scenario status. Check the development server.',
+        );
+      const status = (await statusResponse.json()) as {
+        jobId: number;
+        state: string;
+        lastLine: string;
+      };
+      if (status.jobId !== jobId)
+        throw new Error(
+          'The feeder restarted. Select the latest scenario or retry.',
+        );
+      if (status.state === 'failed')
+        throw new Error(
+          status.lastLine || 'Scenario failed. Check the server logs.',
+        );
+      if (status.state === 'completed') return;
+    }
   }
 }

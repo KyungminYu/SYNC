@@ -549,6 +549,13 @@ export const ui_policy_catalog = db.anonymousView(
   () =>
     [
       {
+        name: 'primal_dual',
+        label: 'SYNC primal-dual',
+        description:
+          'Event-triggered rolling frontier with dynamic capacity prices and exact admission.',
+        baseline: false,
+      },
+      {
         name: 'fcfs',
         label: 'FCFS',
         description: 'Oldest feasible ready task first.',
@@ -590,10 +597,46 @@ export const ui_policy_catalog = db.anonymousView(
       },
     ].map((p) => ({
       ...p,
-      lookahead: false,
+      lookahead: p.name === 'primal_dual',
       default_config_json: JSON.stringify({
         ...DEFAULT_POLICY_CONFIG,
         policy: p.name,
       }),
     })),
+);
+
+const plannerRow = t.row('UiPlannerPayload', {
+  ...base,
+  last_plan_tick: t.u32(),
+  next_wake_tick: t.u32(),
+  replan_count: t.u64(),
+  snapshot_version: t.u64(),
+  trigger: t.string(),
+  objective: t.f64(),
+  candidate_count: t.u32(),
+  candidate_limit_reached: t.bool(),
+  prices_json: t.string(),
+  plan_json: t.string(),
+});
+export const ui_planner = db.view(
+  { name: 'ui_planner', public: true },
+  t.array(plannerRow),
+  (ctx) => {
+    const store = ctx.db as unknown as ViewDb;
+    return readableRuns(store, ctx.sender.toHexString()).flatMap((run) =>
+      [...store.planner.runId.filter(run.id)].map((p) => ({
+        ...rowBase(p),
+        last_plan_tick: p.lastPlanTick,
+        next_wake_tick: p.nextWakeTick,
+        replan_count: p.replanCount,
+        snapshot_version: p.snapshotVersion,
+        trigger: p.trigger,
+        objective: p.objective,
+        candidate_count: p.candidateCount,
+        candidate_limit_reached: p.candidateLimitReached,
+        prices_json: p.pricesJson,
+        plan_json: p.planJson,
+      })),
+    );
+  },
 );

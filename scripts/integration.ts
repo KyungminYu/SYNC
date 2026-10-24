@@ -9,8 +9,8 @@ async function connect(queries: string[]) {
       10000,
     );
     const client = DbConnection.builder()
-      .withUri('http://127.0.0.1:3000')
-      .withDatabaseName('sync-coffee-dev')
+      .withUri(process.env.SPACETIME_URI ?? 'http://127.0.0.1:3000')
+      .withDatabaseName(process.env.SPACETIMEDB_DATABASE ?? 'sync-coffee-dev')
       .onConnect((conn) => {
         conn
           .subscriptionBuilder()
@@ -40,6 +40,7 @@ async function until(predicate: () => boolean) {
   }
 }
 const queries = [
+  'SELECT * FROM ui_planner',
   'SELECT * FROM ui_runs',
   'SELECT * FROM ui_orders',
   'SELECT * FROM ui_resources',
@@ -50,7 +51,7 @@ const queries = [
 try {
   const owner = await connect(queries),
     stranger = await connect(queries);
-  assert.equal([...owner.db.uiPolicyCatalog.iter()].length, 6);
+  assert.equal([...owner.db.uiPolicyCatalog.iter()].length, 7);
   await owner.reducers.createRun({
     name: 'Integration verification',
     seed: 42,
@@ -84,6 +85,10 @@ try {
       priority: 1,
       customerUseTicks: 2,
     });
+  await owner.reducers.setPolicy({
+    runId,
+    configJson: JSON.stringify({ policy: 'primal_dual' }),
+  });
   await owner.reducers.closeArrivals({ runId });
   await owner.reducers.setRunStatus({ runId, running: true });
   await until(() =>
@@ -99,6 +104,7 @@ try {
   );
   assert([...owner.db.uiResources.iter()].every((r) => r.reservedUnits === 0));
   assert.equal([...owner.db.uiMetrics.iter()][0].deliveredOrders, 2);
+  assert([...owner.db.uiPlanner.iter()][0].replanCount > 0n);
   await owner.reducers.grantMember({
     runId,
     identity: stranger.identity!,
@@ -115,7 +121,7 @@ try {
       integration: 'passed',
       runId: runId.toString(),
       cleanedOrders: 2,
-      policies: 6,
+      policies: 7,
       identityIsolation: true,
       revocation: true,
     }),
