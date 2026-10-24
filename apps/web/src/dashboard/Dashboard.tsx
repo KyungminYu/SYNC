@@ -211,7 +211,7 @@ export function Dashboard({
               onStop={runner?.stop && (() => runner.stop!())}
               footnote={
                 runner
-                  ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); each scenario changes one lever.'
+                  ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); scenarios differ by customers and drinks per order.'
                   : undefined
               }
             />
