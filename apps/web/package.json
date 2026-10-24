@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@sync/bindings": "workspace:*",
+    "lucide-react": "1.61.0",
+    "phaser": "4.2.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "spacetimedb": "2.13.0",
