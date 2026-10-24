@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parseEnv } from 'node:util';
 import type { Plugin } from 'vite';
 import { repoRoot } from '../../scripts/lib/databaseConfig.mjs';
 
@@ -7,12 +9,25 @@ import { repoRoot } from '../../scripts/lib/databaseConfig.mjs';
  * Dev-server only: lets the dashboard run and stop the test feeder
  * (scripts/feed-scenario.ts). The dashboard never writes to SpacetimeDB; the
  * feeder process does.
- *   POST   /__dev/feed  {"scenario":"Mid-2","viewer":"<hex>"} → starts a job (ends a running one)
- *   GET    /__dev/feed  → {running, state, lastLine, scenario, jobId, clock}
+ *   POST   /__dev/feed  {"scenario":"Mid-2","viewer":"<hex>","planner":"llm"} → starts a job (ends a running one)
+ *     planner: "algorithm" (default, the engine policy alone) or "llm"
+ *     (an LLM tunes the SYNC planner weights; needs ANTHROPIC_API_KEY)
+ *   GET    /__dev/feed  → {running, state, lastLine, scenario, jobId, clock, planner, llmAvailable}
  *     clock = {startedAt, tickMs}: the job's global clock (tick n due at
  *     startedAt + n × tickMs), read from the feeder's `clock …` line
  *   DELETE /__dev/feed  → stops the running job (state "stopped"; its runs stay unfinished)
  */
+/** True when an Anthropic API key is set (environment, or root .env / .env.local). */
+function llmAvailable() {
+  if (process.env.ANTHROPIC_API_KEY) return true;
+  return ['.env', '.env.local'].some((name) => {
+    const path = resolve(repoRoot, name);
+    return (
+      existsSync(path) && !!parseEnv(readFileSync(path, 'utf8')).ANTHROPIC_API_KEY
+    );
+  });
+}
+
 export function devFeederPlugin(config: {
   uri: string;
   database: string;
@@ -27,6 +42,8 @@ export function devFeederPlugin(config: {
     | 'failed'
     | 'stopped' = 'idle';
   let scenario: string | undefined;
+  /** Planner of the current job's SYNC run. */
+  let planner: 'algorithm' | 'llm' = 'algorithm';
   let jobId = 0;
   /** Global clock of the current job, once the feeder announced it. */
   let clock: { startedAt: number; tickMs: number } | undefined;
@@ -60,6 +77,8 @@ export function devFeederPlugin(config: {
             scenario,
             jobId,
             clock,
+            planner,
+            llmAvailable: llmAvailable(),
           });
         if (req.method === 'DELETE') {
           // Stop from the dashboard: the feeder ends, its runs stay where they are.
@@ -84,7 +103,7 @@ export function devFeederPlugin(config: {
         req.on('error', () => reply(400, { error: 'Request interrupted' }));
         req.on('end', () => {
           if (res.writableEnded) return;
-          let body: { scenario?: unknown; viewer?: unknown };
+          let body: { scenario?: unknown; viewer?: unknown; planner?: unknown };
           try {
             body = JSON.parse(raw);
             if (!body || typeof body !== 'object') throw new Error();
@@ -97,6 +116,13 @@ export function devFeederPlugin(config: {
             return reply(400, { error: 'Scenario must be Low-1 … High-3' });
           if (!/^[0-9a-f]{64}$/.test(viewer))
             return reply(400, { error: 'Viewer must be a 64-hex identity' });
+          const requestedPlanner = String(body.planner ?? 'algorithm');
+          if (requestedPlanner !== 'algorithm' && requestedPlanner !== 'llm')
+            return reply(400, { error: 'Planner must be algorithm or llm' });
+          if (requestedPlanner === 'llm' && !llmAvailable())
+            return reply(400, {
+              error: 'LLM planner needs ANTHROPIC_API_KEY in the repo root .env.local.',
+            });
           // One scenario at a time: starting another ends the running one
           // (its runs stay unfinished, shown as stopped).
           if (child) {
@@ -104,6 +130,7 @@ export function devFeederPlugin(config: {
             child = undefined;
           }
           scenario = requested;
+          planner = requestedPlanner;
           lastLine = 'Starting scenario…';
           state = 'starting';
           jobId++;
@@ -124,6 +151,8 @@ export function devFeederPlugin(config: {
               config.database,
               '--viewer',
               viewer,
+              '--planner',
+              planner,
             ],
             {
               cwd: repoRoot,

@@ -8,6 +8,12 @@ import { databaseConfig } from './lib/databaseConfig.mjs';
  *
  *   corepack pnpm feed --scenario Mid-2 [--viewer <identity hex>]
  *                      [--db sync-coffee-live] [--trays 12] [--ms 200]
+ *                      [--planner algorithm|llm]
+ *
+ * --planner llm: an LLM (scripts/lib/llmPlanner.ts) tunes the SYNC planner's
+ * objective weights (β lateness, γ execution, δ coordination) every 10–30
+ * ticks; needs ANTHROPIC_API_KEY (environment, or the repo root .env /
+ * .env.local).
  *
  * Scenarios differ by customers (12 / 16 / 20) and order size (1, 1–2, 1–3
  * drinks), ranked by total drinks; arrivals keep the mock's pace (seed 5).
@@ -33,7 +39,9 @@ import {
   SCENARIOS,
   type ScenarioDef,
 } from '../apps/web/src/sync/scenarioCatalog';
+import { Identity } from 'spacetimedb';
 import { driveScenario } from './lib/driveScenario';
+import { LlmPlanner } from './lib/llmPlanner';
 
 /** --name value flags with defaults. */
 function flag(name: string, fallback: string) {
@@ -62,6 +70,16 @@ if (!picked)
   );
 // Bound once checked: narrowing does not reach into the functions below.
 const scenario: ScenarioDef = picked;
+const planner = flag('planner', 'algorithm');
+if (planner !== 'algorithm' && planner !== 'llm')
+  throw new Error('--planner must be algorithm or llm');
+// The API key may live in the repo root .env files (never committed).
+for (const file of ['.env.local', '.env'])
+  if (existsSync(file)) process.loadEnvFile(file);
+if (planner === 'llm' && !process.env.ANTHROPIC_API_KEY)
+  throw new Error(
+    '--planner llm needs ANTHROPIC_API_KEY (repo root .env.local)',
+  );
 
 mkdirSync('.local', { recursive: true });
 // One scenario at a time: a new feeder ends any feeder still running (from
@@ -94,6 +112,10 @@ const scope = createHash('sha256')
   .digest('hex')
   .slice(0, 24);
 const TOKEN_FILE = `.local/feeder-${scope}-token`;
+/** Separate identity for the LLM planner: usage reports need a service member. */
+const PLANNER_TOKEN_FILE = `.local/feeder-${scope}-planner-token`;
+/** Views the LLM planner reads (the run's score and its waiting tasks). */
+const PLANNER_QUERIES = ['SELECT * FROM ui_metrics', 'SELECT * FROM ui_tasks'];
 const VIEWERS_FILE = `.local/feeder-${scope}-viewers`;
 const viewers = new Set(
   existsSync(VIEWERS_FILE)
@@ -108,8 +130,8 @@ if (newViewer) {
   writeFileSync(VIEWERS_FILE, [...viewers].join('\n') + '\n');
 }
 
-/** Connects with the stored feeder identity and subscribes to the runs view. */
-function connect() {
+/** Connects with a stored identity and subscribes to the runs view (plus `extra`). */
+function connect(tokenFile = TOKEN_FILE, extra: string[] = []) {
   return new Promise<DbConnection>((resolve, reject) => {
     const timer = setTimeout(() => {
       connection.disconnect();
@@ -119,10 +141,10 @@ function connect() {
       .withUri(uri)
       .withDatabaseName(database)
       .withToken(
-        existsSync(TOKEN_FILE) ? readFileSync(TOKEN_FILE, 'utf8') : undefined,
+        existsSync(tokenFile) ? readFileSync(tokenFile, 'utf8') : undefined,
       )
       .onConnect((conn, _identity, token) => {
-        writeFileSync(TOKEN_FILE, token, { mode: 0o600 });
+        writeFileSync(tokenFile, token, { mode: 0o600 });
         conn
           .subscriptionBuilder()
           .onApplied(() => {
@@ -137,6 +159,7 @@ function connect() {
           .subscribe([
             'SELECT * FROM ui_runs',
             'SELECT * FROM ui_policy_catalog',
+            ...extra,
           ]);
       })
       .onConnectError((_ctx, error) => {
@@ -150,7 +173,8 @@ function connect() {
 /** Runs one owner may have (engine `create_run` limit). */
 const OWNER_RUN_LIMIT = 10;
 async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
-  let conn = await connect();
+  const extra = planner === 'llm' ? PLANNER_QUERIES : [];
+  let conn = await connect(TOKEN_FILE, extra);
   if (
     ![...conn.db.uiPolicyCatalog.iter()].some((p) => p.name === 'primal_dual')
   ) {
@@ -167,7 +191,7 @@ async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
     console.log('feeder identity owns 10 runs: switching to a new identity');
     conn.disconnect();
     rmSync(TOKEN_FILE, { force: true });
-    conn = await connect();
+    conn = await connect(TOKEN_FILE, extra);
   }
   console.log(`feeder identity ${conn.identity!.toHexString()}`);
 
@@ -188,6 +212,11 @@ async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
   console.log(
     `${scenario.id} (${scenario.description}): ${customers.length} customers, ${customers.reduce((k, c) => k + c.items.length, 0)} drinks`,
   );
+  // LLM planner: its own service identity reports usage; the feeder (run
+  // owner) writes the priorities and grants that identity once the runs exist.
+  const reporter =
+    planner === 'llm' ? await connect(PLANNER_TOKEN_FILE) : undefined;
+  let llm: LlmPlanner | undefined;
   try {
     const ids = await driveScenario(conn, {
       seed: SEED,
@@ -198,6 +227,37 @@ async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
       tickMs,
       viewers: [...viewers],
       log: console.log,
+      onRuns: reporter
+        ? ({ sync }) => {
+            const granted = conn.reducers.grantMember({
+              runId: sync,
+              identity: Identity.fromString(reporter.identity!.toHexString()),
+              permission: 'service',
+              enabled: true,
+            });
+            llm = new LlmPlanner({
+              conn,
+              runId: sync,
+              log: console.log,
+              report: async (u) => {
+                await granted;
+                await reporter.reducers.reportUsage({
+                  runId: sync,
+                  externalKey: u.key,
+                  taskId: undefined,
+                  attempt: undefined,
+                  source: 'coordinator',
+                  inputTokens: BigInt(u.inputTokens),
+                  outputTokens: BigInt(u.outputTokens),
+                  reportedCostMicrousd: BigInt(u.costMicrousd),
+                  wallMilliseconds: u.ms,
+                });
+              },
+            });
+            console.log(`llm planner: on for run ${sync}`);
+          }
+        : undefined,
+      beforeStep: (tick) => llm?.beforeStep(tick),
     });
     console.log(
       `done: ${scenario.id} runs ${ids?.baseline} and ${ids?.sync} completed`,
@@ -209,6 +269,7 @@ async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
     process.exitCode = 1;
   } finally {
     conn.disconnect();
+    reporter?.disconnect();
   }
 }
 main(scenario).catch(() => {

@@ -1,4 +1,4 @@
-import type { RunnerClock, ScenarioRunner } from '../runner';
+import type { Planner, RunnerClock, ScenarioRunner } from '../runner';
 import { SCENARIOS } from '../scenarioCatalog';
 
 /**
@@ -14,11 +14,11 @@ export class DevFeederRunner implements ScenarioRunner {
     detail: s.description,
   }));
 
-  async start(id: string, viewer: string) {
+  async start(id: string, viewer: string, planner: Planner = 'algorithm') {
     const res = await fetch('/__dev/feed', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ scenario: id, viewer }),
+      body: JSON.stringify({ scenario: id, viewer, planner }),
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -64,6 +64,12 @@ export class DevFeederRunner implements ScenarioRunner {
     return s.state === 'running' && s.scenario && s.clock
       ? { scenario: s.scenario, ...s.clock }
       : undefined;
+  }
+
+  async llmAvailable() {
+    const res = await fetch('/__dev/feed', { cache: 'no-store' });
+    if (!res.ok) return false;
+    return !!((await res.json()) as { llmAvailable?: boolean }).llmAvailable;
   }
 
   async stop() {

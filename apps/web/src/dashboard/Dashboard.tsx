@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Decision, Policy } from '../sync/contract';
-import type { RunnerClock, ScenarioRunner } from '../sync/runner';
+import type { Planner, RunnerClock, ScenarioRunner } from '../sync/runner';
 import type { ScenarioOption, SyncSource } from '../sync/source';
 import { DecisionsPanel } from './components/DecisionsPanel';
+import { PlannerSwitch } from './components/PlannerSwitch';
 import { ScenarioPicker } from './components/ScenarioPicker';
 import { Scorecard } from './components/Scorecard';
 import { ShopCard } from './components/ShopCard';
@@ -30,6 +31,9 @@ const NONE: never[] = [];
 const DEFAULT_LAYOUT = buildLayout();
 
 /** The one-screen dashboard. Knows only the SyncSource port, never an adapter. */
+/** localStorage key of the SYNC planner choice. */
+const PLANNER_KEY = 'sync-planner';
+
 export function Dashboard({
   source,
   runner,
@@ -91,6 +95,34 @@ export function Dashboard({
   const [selected, setSelected] = useState<Decision>();
   // Stop the runner, then tell the source at once: its runs stay unfinished
   // in the database, so it would otherwise notice only when ticks stop moving.
+  // Who plans the next SYNC run; remembered per browser (a convenience only).
+  const [planner, setPlanner] = useState<Planner>(() => {
+    try {
+      return localStorage.getItem(PLANNER_KEY) === 'llm' ? 'llm' : 'algorithm';
+    } catch {
+      return 'algorithm';
+    }
+  });
+  const pickPlanner = (p: Planner) => {
+    setPlanner(p);
+    try {
+      localStorage.setItem(PLANNER_KEY, p);
+    } catch {
+      // Without storage the choice lasts until reload.
+    }
+  };
+  const [llmOk, setLlmOk] = useState(false);
+  useEffect(() => {
+    if (!runner?.llmAvailable) return;
+    let stop = false;
+    runner.llmAvailable().then(
+      (ok) => !stop && setLlmOk(ok),
+      () => !stop && setLlmOk(false),
+    );
+    return () => {
+      stop = true;
+    };
+  }, [runner]);
   const stopRunner =
     runner?.stop &&
     (async () => {
@@ -133,7 +165,10 @@ export function Dashboard({
   };
   // Scores move once per simulated second; memo keeps the card still in between.
   const second = Math.floor(t);
-  const syncScore = useMemo(() => sync && scoreAt(sync, second), [sync, second]);
+  const syncScore = useMemo(
+    () => sync && scoreAt(sync, second),
+    [sync, second],
+  );
   const baselineScore = useMemo(
     () => baseline && scoreAt(baseline, second),
     [baseline, second],
@@ -195,48 +230,61 @@ export function Dashboard({
       <TopBar
         run={
           scenarios?.length || runner ? (
-            <ScenarioPicker
-              options={
-                runner
-                  ? // Every fixed scenario, with its state in the database
-                    // (never run = listed but not viewable yet).
-                    runner.scenarios
-                      .map((r): ScenarioOption => {
-                        const db = scenarios?.find((s) => s.id === r.id);
-                        return {
-                          ...r,
-                          meta: db?.meta ?? 'not run',
-                          disabled: !db,
-                        };
-                      })
-                      .concat(
-                        (scenarios ?? []).filter(
-                          (s) => !runner.scenarios.some((r) => r.id === s.id),
-                        ),
-                      )
-                  : (scenarios ?? [])
-              }
-              value={scenarioId}
-              showMeta={
-                source.origin === 'live' && source.delivery === 'stream'
-              }
-              onSelect={(id) => source.selectScenario?.(id)}
-              onRun={
-                runner &&
-                (async (id) => {
-                  if (!viewer)
-                    throw new Error('Not connected to the database yet.');
-                  // The source follows the scenario once its new runs appear.
-                  await runner.start(id, viewer);
-                })
-              }
-              onStop={stopRunner}
-              footnote={
-                runner
-                  ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); scenarios differ by customers and drinks per order.'
-                  : undefined
-              }
-            />
+            <div className="run-controls">
+              <ScenarioPicker
+                options={
+                  runner
+                    ? // Every fixed scenario, with its state in the database
+                      // (never run = listed but not viewable yet).
+                      runner.scenarios
+                        .map((r): ScenarioOption => {
+                          const db = scenarios?.find((s) => s.id === r.id);
+                          return {
+                            ...r,
+                            meta: db?.meta ?? 'not run',
+                            disabled: !db,
+                          };
+                        })
+                        .concat(
+                          (scenarios ?? []).filter(
+                            (s) => !runner.scenarios.some((r) => r.id === s.id),
+                          ),
+                        )
+                    : (scenarios ?? [])
+                }
+                value={scenarioId}
+                showMeta={
+                  source.origin === 'live' && source.delivery === 'stream'
+                }
+                onSelect={(id) => source.selectScenario?.(id)}
+                onRun={
+                  runner &&
+                  (async (id) => {
+                    if (!viewer)
+                      throw new Error('Not connected to the database yet.');
+                    // The source follows the scenario once its new runs appear.
+                    await runner.start(
+                      id,
+                      viewer,
+                      planner === 'llm' && llmOk ? 'llm' : 'algorithm',
+                    );
+                  })
+                }
+                onStop={stopRunner}
+                footnote={
+                  runner
+                    ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); scenarios differ by customers and drinks per order.'
+                    : undefined
+                }
+              />
+              {runner?.llmAvailable && (
+                <PlannerSwitch
+                  value={llmOk ? planner : 'algorithm'}
+                  llmAvailable={llmOk}
+                  onChange={pickPlanner}
+                />
+              )}
+            </div>
           ) : (
             runLabel
           )
