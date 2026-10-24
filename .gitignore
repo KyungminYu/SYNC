@@ -8,3 +8,5 @@ dist/
 coverage/
 *.log
 *.png
+# macOS Finder metadata
+.DS_Store
