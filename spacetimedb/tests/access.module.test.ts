@@ -87,7 +87,12 @@ it('executes a complete reducer lifecycle and releases reservations', () => {
     i++
   )
     test.withReducerTx(alice, (ctx) => api.step_run(ctx, { runId }));
-  expect(api.ui_orders(test.viewContext(alice))[0]!.status).toBe('cleaned');
+  expect(
+    api.ui_orders(test.viewContext(alice))[0]!.status,
+    JSON.stringify(api.ui_tasks(test.viewContext(alice)), (_k, v) =>
+      typeof v === 'bigint' ? String(v) : v,
+    ),
+  ).toBe('cleaned');
   expect(
     api
       .ui_resources(test.viewContext(alice))
@@ -117,4 +122,57 @@ it('rolls back previously successful writes in a failed transaction', () => {
     }),
   ).toThrow('rollback');
   expect(api.ui_runs(test.viewContext(alice))).toEqual([]);
+});
+
+it('persists duplicate-cart membership, recipes and joined delivery through real reducers', () => {
+  const test = createModuleTestHarness(schema, api);
+  const alice = principal('cart-owner', 9n);
+  test.withReducerTx(alice, (ctx) =>
+    api.create_run(ctx, {
+      name: 'Cart',
+      seed: 5,
+      trayCount: 1,
+      mode: 'deterministic',
+      budgetMicrousd: undefined,
+    }),
+  );
+  const runId = api.ui_runs(test.viewContext(alice))[0]!.id;
+  test.withReducerTx(alice, (ctx) =>
+    api.enqueue_cart(ctx, {
+      runId,
+      cartKey: 'five',
+      items: [{ recipe: 'latte', quantity: 5 }],
+      deadlineInTicks: 100,
+      value: 1,
+      priority: 1,
+      customerUseTicks: 1,
+    }),
+  );
+  test.withReducerTx(alice, (ctx) =>
+    api.set_policy(ctx, {
+      runId,
+      configJson: JSON.stringify({ policy: 'primal_dual' }),
+    }),
+  );
+  test.withReducerTx(alice, (ctx) => api.close_arrivals(ctx, { runId }));
+  for (
+    let i = 0;
+    i < 250 && api.ui_runs(test.viewContext(alice))[0]!.status !== 'completed';
+    i++
+  )
+    test.withReducerTx(alice, (ctx) => api.step_run(ctx, { runId }));
+  const orders = api.ui_orders(test.viewContext(alice));
+  expect(orders).toHaveLength(5);
+  expect(
+    orders.every((o) => o.recipe_key === 'latte' && o.status === 'cleaned'),
+  ).toBe(true);
+  expect(new Set(orders.map((o) => o.delivered_tick)).size).toBe(1);
+  expect(
+    api
+      .ui_tasks(test.viewContext(alice))
+      .some((t) => t.order_ids.length === 5 && t.kind === 'deliver_order'),
+  ).toBe(true);
+  expect(
+    api.service_workers(test.viewContext(principal('outsider', 10n))),
+  ).toEqual([]);
 });

@@ -1,5 +1,6 @@
 # SYNC execution, scheduling, and access policies
 
+Current cart/external-worker changes supersede the earlier placeholder/frontier-only descriptions below. See [Cart execution](CART_EXECUTION.md) for the current contract and migration notes.
 This document describes the behavior implemented by this source bundle. The
 coffee-shop adapter uses generic tasks, capabilities, worker slots, resource
 requirements, and assignment proposals. All database writes occur through

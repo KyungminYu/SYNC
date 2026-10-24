@@ -9,9 +9,9 @@
  * set the corresponding order condition before admitting collect_tray.
  */
 export const ROLE_CAPACITIES = {
-  cashier: 1,
-  barista: 1,
-  server: 1,
+  cashier: 2,
+  barista: 2,
+  server: 2,
   cleaner: 1,
 } as const;
 export type Role = keyof typeof ROLE_CAPACITIES;
@@ -32,6 +32,8 @@ export const TASK_KINDS = [
   'take_payment',
   'prepare_coffee',
   'prepare_milk',
+  'wash_pitcher',
+  'prepare_cups',
   'assemble_drink',
   'pick_up_drink',
   'deliver_order',
@@ -52,6 +54,11 @@ export interface TaskDefinition {
   rewardDelivery: boolean;
 }
 export const TASK_STEPS: Record<TaskKind, string[]> = {
+  prepare_cups: ['Prepare and label cups for the order instances.'],
+  wash_pitcher: [
+    'Wash and sanitize the used pitcher.',
+    'Return the pitcher to clean inventory.',
+  ],
   capture_order: [
     'Read the customer request.',
     'Validate the recipe and supported options.',

@@ -22,6 +22,8 @@ export type SourceStatus =
 
 /** One entry of the scenario dropdown (Figma "Scenario dropdown (open)"). */
 export interface ScenarioOption {
+  /** External runs are controlled by their owner, not the scenario feeder. */
+  canRun?: boolean;
   id: string;
   label: string;
   /** Menu section, e.g. "Low" or "Saved live results". */

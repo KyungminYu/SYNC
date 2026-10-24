@@ -52,6 +52,7 @@ export interface Zone {
 
 /** A staff member. Several agents may share a role (named "Cashier 1/2"). */
 export interface Agent {
+  enabled?: boolean;
   id: string;
   name: string;
   role: Role;
@@ -92,6 +93,10 @@ export interface Job {
 
 /** One node of an order's task DAG (take order, make drink, hand off, clean up). */
 export interface Task {
+  /** False for preparation at a pickup station; do not call the customer yet. */
+  customerHandoff?: boolean;
+  /** All customers sharing a batched operation. */
+  jobIds?: string[];
   id: string;
   jobId: string;
   label: string;

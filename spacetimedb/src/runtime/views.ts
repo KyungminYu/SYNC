@@ -1,3 +1,5 @@
+import { evaluateRun } from '../domain/reward.ts';
+import { taskOrders } from '../domain/cartWorkflow.ts';
 import { t } from 'spacetimedb/server';
 import { db } from '../tables.ts';
 import { readableRuns, serviceRuns } from './store.ts';
@@ -30,7 +32,7 @@ const orderRow = t.row('UiOrderPayload', {
   ...base,
   // Customer cart this order (menu item) belongs to.
   cart_key: t.string(),
-  recipe: t.string(),
+  recipe_key: t.string(),
   status: t.string(),
   arrival_tick: t.u32(),
   deadline_tick: t.u32(),
@@ -47,6 +49,7 @@ const orderRow = t.row('UiOrderPayload', {
 const taskRow = t.row('UiTaskPayload', {
   ...base,
   order_id: t.u64(),
+  order_ids: t.array(t.u64()),
   kind: t.string(),
   role: t.string(),
   status: t.string(),
@@ -55,6 +58,7 @@ const taskRow = t.row('UiTaskPayload', {
   release_tick: t.u32(),
   deadline_tick: t.option(t.u32()),
   duration_ticks: t.u32(),
+  estimated_cost_microusd: t.u64(),
   attempt: t.u32(),
   worker_id: t.option(t.u64()),
   started_tick: t.option(t.u32()),
@@ -139,6 +143,10 @@ const metricsRow = t.row('UiMetricsPayload', {
   ready_tasks: t.u32(),
   busy_workers: t.u32(),
   total_workers: t.u32(),
+  active_workers: t.u32(),
+  reward: t.f64(),
+  penalty: t.f64(),
+  net_reward: t.f64(),
   dirty_or_in_use_trays: t.u32(),
   modeled_spent_microusd: t.u64(),
   reserved_microusd: t.u64(),
@@ -208,17 +216,20 @@ export const ui_orders = db.view(
   t.array(orderRow),
   (ctx) =>
     states(ctx.db as unknown as ViewDb, ctx.sender.toHexString(), [
+      'taskItems',
       'carts',
       'recipes',
       'orders',
       'tasks',
     ]).flatMap((s) =>
       s.orders.map((o) => {
-        const tasks = s.tasks.filter((t) => t.orderId === o.id);
+        const tasks = s.tasks.filter((t) =>
+          taskOrders(s, t).some((x) => x.id === o.id),
+        );
         return {
           ...rowBase(o),
           cart_key: s.carts.find((c) => c.id === o.cartId)!.externalKey,
-          recipe: recipeOf(s, o).recipe,
+          recipe_key: recipeOf(s, o).recipe,
           status: o.status,
           arrival_tick: o.arrivalTick,
           deadline_tick: o.deadlineTick,
@@ -245,6 +256,8 @@ export const ui_tasks = db.view(
       'orders',
       'tasks',
       'dependencies',
+      'taskItems',
+      'utensils',
       'workers',
       'requirements',
       'resources',
@@ -287,6 +300,7 @@ export const ui_tasks = db.view(
         return {
           ...rowBase(task),
           order_id: task.orderId,
+          order_ids: taskOrders(s, task).map((o) => o.id),
           kind: task.kind,
           role: task.role,
           status: task.status,
@@ -298,6 +312,7 @@ export const ui_tasks = db.view(
           release_tick: task.releaseTick,
           deadline_tick: task.deadlineTick,
           duration_ticks: task.durationTicks,
+          estimated_cost_microusd: task.estimatedCostMicrousd,
           attempt: task.attempt,
           worker_id: task.workerId,
           started_tick: task.startedTick,
@@ -455,6 +470,9 @@ export const ui_metrics = db.view(
       'workers',
       'trays',
       'telemetry',
+      'carts',
+      'jobs',
+      'events',
       'decisions',
     ]).map((s) => {
       const delivered = s.orders.filter((o) => o.deliveredTick !== undefined);
@@ -492,6 +510,10 @@ export const ui_metrics = db.view(
         busy_workers: s.workers.filter((w) => w.currentTaskId !== undefined)
           .length,
         total_workers: s.workers.length,
+        active_workers: s.workers.filter((w) => w.enabled).length,
+        reward: evaluateRun(s, s.run.tick).reward,
+        penalty: evaluateRun(s, s.run.tick).penalty,
+        net_reward: evaluateRun(s, s.run.tick).netReward,
         dirty_or_in_use_trays: s.trays.filter((t) => t.state !== 'clean')
           .length,
         modeled_spent_microusd: s.run.modeledSpentMicrousd,
@@ -636,6 +658,33 @@ export const ui_planner = db.view(
         candidate_limit_reached: p.candidateLimitReached,
         prices_json: p.pricesJson,
         plan_json: p.planJson,
+      })),
+    );
+  },
+);
+const serviceWorkerRow = t.row('ServiceWorkerPayload', {
+  ...base,
+  label: t.string(),
+  role: t.string(),
+  enabled: t.bool(),
+  run_status: t.string(),
+  mode: t.string(),
+  current_task_id: t.option(t.u64()),
+});
+export const service_workers = db.view(
+  { name: 'service_workers', public: true },
+  t.array(serviceWorkerRow),
+  (ctx) => {
+    const store = ctx.db as unknown as ViewDb;
+    return serviceRuns(store, ctx.sender.toHexString()).flatMap((run) =>
+      [...store.workers.runId.filter(run.id)].map((w) => ({
+        ...rowBase(w),
+        label: w.label,
+        role: w.role,
+        enabled: w.enabled,
+        run_status: run.status,
+        mode: run.mode,
+        current_task_id: w.currentTaskId,
       })),
     );
   },

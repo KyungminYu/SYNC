@@ -37,11 +37,14 @@ import {
 import ClaimAgentJobReducer from "./claim_agent_job_reducer";
 import CloseArrivalsReducer from "./close_arrivals_reducer";
 import CreateRunReducer from "./create_run_reducer";
+import EnqueueCartReducer from "./enqueue_cart_reducer";
 import EnqueueOrderReducer from "./enqueue_order_reducer";
 import GrantMemberReducer from "./grant_member_reducer";
 import MarkJobUncertainReducer from "./mark_job_uncertain_reducer";
 import ReconcileJobReducer from "./reconcile_job_reducer";
+import ReportAgentResultReducer from "./report_agent_result_reducer";
 import ReportUsageReducer from "./report_usage_reducer";
+import RequestJobCancellationReducer from "./request_job_cancellation_reducer";
 import SetModeledBudgetReducer from "./set_modeled_budget_reducer";
 import SetPolicyReducer from "./set_policy_reducer";
 import SetResourceAvailableReducer from "./set_resource_available_reducer";
@@ -54,6 +57,7 @@ import SubmitAgentActionReducer from "./submit_agent_action_reducer";
 
 // Import all table schema definitions
 import ServiceJobsRow from "./service_jobs_table";
+import ServiceWorkersRow from "./service_workers_table";
 import UiDagEdgesRow from "./ui_dag_edges_table";
 import UiDecisionsRow from "./ui_decisions_table";
 import UiEventsRow from "./ui_events_table";
@@ -78,6 +82,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, ServiceJobsRow),
+  serviceWorkers: __table({
+    name: 'service_workers',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, ServiceWorkersRow),
   uiDagEdges: __table({
     name: 'ui_dag_edges',
     indexes: [
@@ -169,11 +180,14 @@ const reducersSchema = __reducers(
   __reducerSchema("claim_agent_job", ClaimAgentJobReducer),
   __reducerSchema("close_arrivals", CloseArrivalsReducer),
   __reducerSchema("create_run", CreateRunReducer),
+  __reducerSchema("enqueue_cart", EnqueueCartReducer),
   __reducerSchema("enqueue_order", EnqueueOrderReducer),
   __reducerSchema("grant_member", GrantMemberReducer),
   __reducerSchema("mark_job_uncertain", MarkJobUncertainReducer),
   __reducerSchema("reconcile_job", ReconcileJobReducer),
+  __reducerSchema("report_agent_result", ReportAgentResultReducer),
   __reducerSchema("report_usage", ReportUsageReducer),
+  __reducerSchema("request_job_cancellation", RequestJobCancellationReducer),
   __reducerSchema("set_modeled_budget", SetModeledBudgetReducer),
   __reducerSchema("set_policy", SetPolicyReducer),
   __reducerSchema("set_resource_available", SetResourceAvailableReducer),
@@ -191,6 +205,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
   tables: typeof tablesSchema.schemaType.tables & {
     /** @deprecated Use `serviceJobs` instead. This alias will be removed in the next major version. */
     readonly "service_jobs": Omit<typeof tablesSchema.schemaType.tables["serviceJobs"], "accessorName"> & { readonly accessorName: "service_jobs" };
+    /** @deprecated Use `serviceWorkers` instead. This alias will be removed in the next major version. */
+    readonly "service_workers": Omit<typeof tablesSchema.schemaType.tables["serviceWorkers"], "accessorName"> & { readonly accessorName: "service_workers" };
     /** @deprecated Use `uiDagEdges` instead. This alias will be removed in the next major version. */
     readonly "ui_dag_edges": Omit<typeof tablesSchema.schemaType.tables["uiDagEdges"], "accessorName"> & { readonly accessorName: "ui_dag_edges" };
     /** @deprecated Use `uiDecisions` instead. This alias will be removed in the next major version. */
@@ -234,6 +250,7 @@ const REMOTE_MODULE = {
 
 const tableAccessorAliases = {
   "service_jobs": "serviceJobs",
+  "service_workers": "serviceWorkers",
   "ui_dag_edges": "uiDagEdges",
   "ui_decisions": "uiDecisions",
   "ui_events": "uiEvents",
@@ -268,6 +285,8 @@ type __DbViewBase = __DbConnectionImpl<typeof REMOTE_MODULE>["db"];
 export type DbView = __DbViewBase & {
   /** @deprecated Use `serviceJobs` instead. This alias will be removed in the next major version. */
   readonly "service_jobs": __DbViewBase["serviceJobs"];
+  /** @deprecated Use `serviceWorkers` instead. This alias will be removed in the next major version. */
+  readonly "service_workers": __DbViewBase["serviceWorkers"];
   /** @deprecated Use `uiDagEdges` instead. This alias will be removed in the next major version. */
   readonly "ui_dag_edges": __DbViewBase["uiDagEdges"];
   /** @deprecated Use `uiDecisions` instead. This alias will be removed in the next major version. */
@@ -298,6 +317,8 @@ type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
 export type Tables = __TablesBase & {
   /** @deprecated Use `serviceJobs` instead. This alias will be removed in the next major version. */
   readonly "service_jobs": __TablesBase["serviceJobs"];
+  /** @deprecated Use `serviceWorkers` instead. This alias will be removed in the next major version. */
+  readonly "service_workers": __TablesBase["serviceWorkers"];
   /** @deprecated Use `uiDagEdges` instead. This alias will be removed in the next major version. */
   readonly "ui_dag_edges": __TablesBase["uiDagEdges"];
   /** @deprecated Use `uiDecisions` instead. This alias will be removed in the next major version. */

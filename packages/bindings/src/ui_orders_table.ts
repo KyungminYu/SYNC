@@ -15,7 +15,7 @@ export default __t.row({
   id: __t.u64(),
   runId: __t.u64().name("run_id"),
   cartKey: __t.string().name("cart_key"),
-  recipe: __t.string(),
+  recipeKey: __t.string().name("recipe_key"),
   status: __t.string(),
   arrivalTick: __t.u32().name("arrival_tick"),
   deadlineTick: __t.u32().name("deadline_tick"),

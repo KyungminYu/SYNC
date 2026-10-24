@@ -1,5 +1,7 @@
 # Integration handoff
 
+Current cart/external-worker changes supersede the earlier placeholder/frontier-only descriptions below. See [Cart execution](CART_EXECUTION.md) for the current contract and migration notes.
+
 ## Entry points and ownership
 
 `spacetimedb/src/index.ts` exports the single schema from `tables.ts`, reducers from `runtime/reducers.ts`, and views from `runtime/views.ts`. The pure engine and six policies are now owned by this module. Do not restore the old `packages/sync-core`, `contracts`, or `test-fixtures` definitions: they describe a different domain/API.

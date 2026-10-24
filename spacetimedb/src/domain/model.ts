@@ -45,7 +45,7 @@ export type Cart = Base & {
   arrivalTick: number;
   status: CartStatus;
 };
-// One recipe row per order (1:1, referenced by Order.recipeId).
+// Reusable recipe definition referenced by Order.recipeId.
 export type Recipe = Base & {
   recipe: RecipeId;
   name: string;
@@ -67,10 +67,9 @@ export type Order = Base & {
   trayId?: bigint;
 };
 export type Task = Base & {
-  // Denormalized from the owning order for cart- and recipe-scoped lookups.
+  // Lead order and cart; taskItems records all orders in a shared operation.
   cartId: bigint;
   orderId: bigint;
-  recipeId: bigint;
   kind: TaskKind;
   role: string;
   status: TaskStatus;
@@ -132,7 +131,15 @@ export type Job = Base & {
   taskId: bigint;
   workerId: bigint;
   attempt: number;
-  status: 'pending' | 'claimed' | 'accepted' | 'failed' | 'uncertain';
+  status:
+    | 'pending'
+    | 'claimed'
+    | 'accepted'
+    | 'failed'
+    | 'uncertain'
+    | 'cancel_requested'
+    | 'cancelled'
+    | 'succeeded';
   claimantIdentityHex?: string;
   claimedTick?: number;
   submittedTick?: number;
@@ -186,7 +193,11 @@ export type Planner = Base & {
   pricesJson: string;
   planJson: string;
 };
+export type TaskItem = Base & { taskId: bigint; orderId: bigint };
+export type Utensil = Base & { kind: string; state: string; taskId?: bigint };
 export type State = {
+  taskItems: TaskItem[];
+  utensils: Utensil[];
   planner: Planner[];
   run: Run;
   members: Member[];
@@ -209,6 +220,8 @@ export type Principal = {
   identityHex: string;
 };
 export const STATE_TABLES = [
+  'taskItems',
+  'utensils',
   'planner',
   'members',
   'carts',

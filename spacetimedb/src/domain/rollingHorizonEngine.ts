@@ -1,3 +1,5 @@
+import { admissionBackpressure } from './staffing.ts';
+import { taskOrders } from './cartWorkflow.ts';
 import type { State } from './model.ts';
 import { nextBase } from './model.ts';
 import type { Assignment } from '../policies/scheduler.ts';
@@ -36,6 +38,8 @@ export function planningFingerprint(s: State): string {
     s.dependencies,
     s.trays,
     s.orders,
+    s.utensils,
+    s.taskItems,
   ]);
 }
 
@@ -60,8 +64,23 @@ export class RollingHorizonEngine {
     const now = s.run.tick;
     const end = now + ROLLING_CONFIG.horizon;
     const capacity = new Map<string, bigint>();
+    const taskById = new Map(s.tasks.map((t) => [t.id, t]));
+    const membersByTask = new Map(s.tasks.map((t) => [t.id, taskOrders(s, t)]));
+    const predecessorsByTask = new Map(
+      s.tasks.map((t) => [t.id, [] as typeof s.tasks]),
+    );
+    for (const edge of s.dependencies)
+      predecessorsByTask
+        .get(edge.successorId)!
+        .push(taskById.get(edge.predecessorId)!);
+    const requirementsByTask = new Map(
+      s.tasks.map((t) => [t.id, [] as typeof s.requirements]),
+    );
+    for (const req of s.requirements)
+      requirementsByTask.get(req.taskId)!.push(req);
+
     const release = (taskId: bigint): number => {
-      const task = s.tasks.find((t) => t.id === taskId);
+      const task = taskById.get(taskId);
       // Assigned, uncertain, and overdue work retains capacity throughout the horizon.
       return task?.status === 'running' &&
         task.finishAtTick !== undefined &&
@@ -92,6 +111,10 @@ export class RollingHorizonEngine {
       .filter((t) => t.state === 'clean' && t.orderId === undefined)
       .map((t) => t.id);
     capacity.set('trays', BigInt(trays.length));
+    capacity.set(
+      'pitchers',
+      BigInt(s.utensils.filter((u) => u.state === 'clean').length),
+    );
     if (s.run.budgetMicrousd !== undefined)
       capacity.set(
         'budget',
@@ -101,7 +124,11 @@ export class RollingHorizonEngine {
       );
     const candidates: Candidate[] = [];
     const tasks = s.tasks
-      .filter((t) => t.status === 'ready')
+      .filter(
+        (t) =>
+          ['ready', 'blocked'].includes(t.status) &&
+          !admissionBackpressure(s, t.id),
+      )
       .sort((a, b) => (a.id < b.id ? -1 : 1));
     // Start-time outer loop ensures the bounded candidate prefix includes due-now choices first.
     outer: for (let start = now; start < end; start++)
@@ -118,6 +145,8 @@ export class RollingHorizonEngine {
             1,
             Math.ceil(task.durationTicks / worker.speedFactor),
           );
+          if (start < task.releaseTick) continue;
+          if (start === now && task.status !== 'ready') continue;
           const finish = start + durationTicks;
           const demand = new Map<string, bigint>();
           const add = (key: string, units: bigint) =>
@@ -125,11 +154,14 @@ export class RollingHorizonEngine {
           // Long work occupies all remaining slots; its true finish is retained in the forecast.
           for (let tick = start; tick < Math.min(end, finish); tick++) {
             add(`worker:${worker.id}:${tick}`, 1n);
-            for (const req of s.requirements.filter(
-              (r) => r.taskId === task.id,
-            ))
+            for (const req of requirementsByTask.get(task.id)!)
               add(`resource:${req.resourceId}:${tick}`, BigInt(req.units));
           }
+          if (
+            task.kind === 'prepare_milk' &&
+            s.taskItems.some((i) => i.taskId === task.id)
+          )
+            add('pitchers', 1n);
           if (capacity.has('budget')) add('budget', task.estimatedCostMicrousd);
           if (
             task.trayMode === 'acquire' &&
@@ -145,10 +177,15 @@ export class RollingHorizonEngine {
               : Math.max(0, finish - task.deadlineTick);
           const utility =
             1 +
-            task.value +
+            membersByTask.get(task.id)!.reduce((v, o) => v + o.value, 0) +
             task.priority +
             age * 0.05 +
-            Math.min(30, late) * 0.1;
+            Math.min(30, late) * 0.1 +
+            (task.kind === 'wash_pitcher' &&
+            !s.utensils.some((u) => u.state === 'clean')
+              ? 20
+              : 0) -
+            Math.min(1, Number(task.estimatedCostMicrousd) / 1000000);
           candidates.push({
             taskId: task.id,
             workerId: worker.id,
@@ -180,9 +217,13 @@ export class RollingHorizonEngine {
       const remaining = new Map(capacity);
       const used = new Set<bigint>();
       const selected: Candidate[] = [];
+      const finishes = new Map<bigint, number>();
       const ordered = candidates
         .map((c, i) => ({ c, i, score: priced ? bid(c) : c.utility }))
-        .sort((a, b) => b.score - a.score || a.i - b.i);
+        .sort(
+          (a, b) =>
+            a.c.startTick - b.c.startTick || b.score - a.score || a.i - b.i,
+        );
       for (const { c, score } of ordered) {
         if (
           score <= 0 ||
@@ -190,8 +231,43 @@ export class RollingHorizonEngine {
           [...c.demand].some(([k, n]) => n > (remaining.get(k) ?? 0n))
         )
           continue;
+        // Full revealed DAG: every forecast successor requires an actual completed
+        // predecessor, a running estimate, or a selected predecessor in this plan.
+        const task = taskById.get(c.taskId)!;
+        const predecessors = predecessorsByTask.get(task.id)!;
+        if (
+          predecessors.some(
+            (p) =>
+              p.status !== 'succeeded' &&
+              (p.status === 'running'
+                ? release(p.id)
+                : (finishes.get(p.id) ?? Infinity)) > c.startTick,
+          )
+        )
+          continue;
+        if (task.customerReleaseGuard) {
+          const members = membersByTask.get(task.id)!;
+          const delivery = predecessors.find((p) => p.kind === 'deliver_order');
+          const deliveryFinish =
+            delivery?.status === 'succeeded'
+              ? delivery.finishedTick
+              : delivery
+                ? finishes.get(delivery.id)
+                : undefined;
+          if (
+            members.some(
+              (o) =>
+                (o.customerReleaseTick ??
+                  (deliveryFinish === undefined
+                    ? Infinity
+                    : deliveryFinish + o.customerUseTicks)) > c.startTick,
+            )
+          )
+            continue;
+        }
         used.add(c.taskId);
         selected.push(c);
+        finishes.set(c.taskId, c.finishTick);
         for (const [k, n] of c.demand) remaining.set(k, remaining.get(k)! - n);
       }
       return selected;

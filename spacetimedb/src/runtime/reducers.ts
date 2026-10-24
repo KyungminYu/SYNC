@@ -1,3 +1,8 @@
+import {
+  requestCancellation,
+  reportJobResult,
+} from '../domain/externalExecution.ts';
+import { addCart } from '../domain/cartWorkflow.ts';
 import { t } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
 import { db, clock } from '../tables.ts';
@@ -335,6 +340,68 @@ export const set_modeled_budget = db.reducer(
       s,
       { identityHex: ctx.sender.toHexString() },
       args.budgetMicrousd,
+    );
+    save(store, s);
+  },
+);
+
+export const enqueue_cart = db.reducer(
+  {
+    runId: t.u64(),
+    cartKey: t.string(),
+    items: t.array(
+      t.object('CartItemInput', { recipe: t.string(), quantity: t.u32() }),
+    ),
+    deadlineInTicks: t.u32(),
+    value: t.u32(),
+    priority: t.u32(),
+    customerUseTicks: t.u32(),
+  },
+  (ctx, args) => {
+    const store = ctx.db as unknown as MutableDb;
+    const s = load(store, args.runId);
+    if (args.items.some((i) => !isRecipeId(i.recipe)))
+      throw new Error('INVALID_RECIPE');
+    addCart(
+      s,
+      { identityHex: ctx.sender.toHexString() },
+      {
+        ...args,
+        items: args.items as {
+          recipe: import('../domain/recipes.ts').RecipeId;
+          quantity: number;
+        }[],
+      },
+    );
+    schedule(s);
+    save(store, s);
+  },
+);
+
+export const request_job_cancellation = db.reducer(
+  { runId: t.u64(), jobId: t.u64() },
+  (ctx, args) => {
+    const store = ctx.db as unknown as MutableDb;
+    const s = load(store, args.runId);
+    requestCancellation(
+      s,
+      { identityHex: ctx.sender.toHexString() },
+      args.jobId,
+    );
+    save(store, s);
+  },
+);
+export const report_agent_result = db.reducer(
+  { runId: t.u64(), jobId: t.u64(), attempt: t.u32(), outcome: t.string() },
+  (ctx, args) => {
+    const store = ctx.db as unknown as MutableDb;
+    const s = load(store, args.runId);
+    reportJobResult(
+      s,
+      { identityHex: ctx.sender.toHexString() },
+      args.jobId,
+      args.attempt,
+      args.outcome,
     );
     save(store, s);
   },

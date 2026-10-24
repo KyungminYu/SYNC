@@ -55,9 +55,9 @@ const TERMS: Term[] = [
   {
     sign: '−',
     label: 'Execution cost',
-    hint: 'lower is better · model / tool / compute',
+    hint: 'lower is better · modeled execution dollars',
     value: (s) => s.execCost,
-    text: (s) => `${s.execCost}`,
+    text: (s) => `$${(s.execCost ?? 0).toFixed(4)}`,
     scale: (both) => Math.max(1, ...both.map((s) => s.execCost ?? 0)) * 1.15,
   },
 ];
@@ -166,7 +166,7 @@ export function Scorecard({
         <p>
           {baseline && sync
             ? summary(baseline, sync)
-            : 'Waiting for both runs…'}
+            : 'Single-run results; no baseline comparison yet.'}
         </p>
         {(benchmark || seedLine) && (
           <span>

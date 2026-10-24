@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Decision, Policy } from '../sync/contract';
 import type { RunnerClock, ScenarioRunner } from '../sync/runner';
-import type { SyncSource } from '../sync/source';
+import type { ScenarioOption, SyncSource } from '../sync/source';
 import { DecisionsPanel } from './components/DecisionsPanel';
 import { ScenarioPicker } from './components/ScenarioPicker';
 import { Scorecard } from './components/Scorecard';
@@ -151,19 +151,32 @@ export function Dashboard({
                 runner
                   ? // Every fixed scenario, with its state in the database
                     // (never run = listed but not viewable yet).
-                    runner.scenarios.map((r) => {
-                      const db = scenarios?.find((s) => s.id === r.id);
-                      return { ...r, meta: db?.meta ?? 'not run', disabled: !db };
-                    })
+                    runner.scenarios
+                      .map((r): ScenarioOption => {
+                        const db = scenarios?.find((s) => s.id === r.id);
+                        return {
+                          ...r,
+                          meta: db?.meta ?? 'not run',
+                          disabled: !db,
+                        };
+                      })
+                      .concat(
+                        (scenarios ?? []).filter(
+                          (s) => !runner.scenarios.some((r) => r.id === s.id),
+                        ),
+                      )
                   : (scenarios ?? [])
               }
               value={scenarioId}
-              showMeta={source.origin === 'live' && source.delivery === 'stream'}
+              showMeta={
+                source.origin === 'live' && source.delivery === 'stream'
+              }
               onSelect={(id) => source.selectScenario?.(id)}
               onRun={
                 runner &&
                 (async (id) => {
-                  if (!viewer) throw new Error('Not connected to the database yet.');
+                  if (!viewer)
+                    throw new Error('Not connected to the database yet.');
                   // The source follows the scenario once its new runs appear.
                   await runner.start(id, viewer);
                 })
@@ -183,7 +196,11 @@ export function Dashboard({
         status={status}
         label={source.label}
         clock={externalClock ? source.clockNote : undefined}
-        onStop={runner?.stop && (() => void runner.stop!())}
+        onStop={
+          scenarios?.find((s) => s.id === scenarioId)?.canRun === false
+            ? undefined
+            : runner?.stop && (() => void runner.stop!())
+        }
         mode={mode}
         onMode={onMode}
       />

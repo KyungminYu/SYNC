@@ -1,3 +1,4 @@
+import { reportJobResult } from '../src/domain/externalExecution.ts';
 /** Run with Node.js 24+: node --test tests/engine.node.test.ts */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -463,6 +464,7 @@ test('safe retry of pickup retains its order-owned tray without acquiring anothe
     for (const job of s.jobs.filter((j) => j.status === 'pending')) {
       claimJob(s, SERVICE, job.id);
       submitAction(s, SERVICE, job.id, job.attempt, job.expectedAction);
+      reportJobResult(s, SERVICE, job.id, job.attempt, 'completed');
     }
     advance(s);
     pickupJob = s.jobs.find(
@@ -560,6 +562,7 @@ test('live mode can complete the entire DAG using validated mock agent actions',
     for (const job of s.jobs.filter((j) => j.status === 'pending')) {
       claimJob(s, SERVICE, job.id);
       submitAction(s, SERVICE, job.id, job.attempt, job.expectedAction);
+      reportJobResult(s, SERVICE, job.id, job.attempt, 'completed');
     }
     advance(s);
     assertInvariants(s);

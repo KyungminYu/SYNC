@@ -28,7 +28,14 @@ const cartKey = cartKeyFor('c1', [
 ]);
 let nextTask = 100n;
 /** A finished task of `order` worked by worker `w` from `s` to `f`. */
-const task = (order: bigint, kind: string, role: string, w: bigint, s: number, f?: number): TaskRow => ({
+const task = (
+  order: bigint,
+  kind: string,
+  role: string,
+  w: bigint,
+  s: number,
+  f?: number,
+): TaskRow => ({
   id: nextTask++,
   runId: 1n,
   orderId: order,
@@ -41,10 +48,32 @@ const task = (order: bigint, kind: string, role: string, w: bigint, s: number, f
   durationTicks: 2,
 });
 const rows: RunRows = {
-  run: { id: 1n, name: 'SYNC sync_greedy · seed 5', seed: 5, tick: 40, status: 'running' },
+  run: {
+    id: 1n,
+    name: 'SYNC sync_greedy · seed 5',
+    seed: 5,
+    tick: 40,
+    status: 'running',
+  },
   orders: [
-    { id: 11n, runId: 1n, cartKey, recipe: 'latte', arrivalTick: 10, deadlineTick: 98, deliveredTick: 30 },
-    { id: 12n, runId: 1n, cartKey, recipe: 'black_coffee', arrivalTick: 10, deadlineTick: 98, deliveredTick: 33 },
+    {
+      id: 11n,
+      runId: 1n,
+      cartKey,
+      recipe: 'latte',
+      arrivalTick: 10,
+      deadlineTick: 98,
+      deliveredTick: 30,
+    },
+    {
+      id: 12n,
+      runId: 1n,
+      cartKey,
+      recipe: 'black_coffee',
+      arrivalTick: 10,
+      deadlineTick: 98,
+      deliveredTick: 33,
+    },
   ],
   tasks: [
     task(11n, 'capture_order', 'cashier', 1n, 11, 13),
@@ -58,14 +87,26 @@ const rows: RunRows = {
   ],
   workers,
   decisions: [
-    { runId: 1n, sequence: 7n, tick: 11, taskId: 100n, workerId: 1n, score: 0.82, reasonCodes: ['sync_greedy', 'compatible_worker'], snapshotVersion: 12n },
+    {
+      runId: 1n,
+      sequence: 7n,
+      tick: 11,
+      taskId: 100n,
+      workerId: 1n,
+      score: 0.82,
+      reasonCodes: ['sync_greedy', 'compatible_worker'],
+      snapshotVersion: 12n,
+    },
   ],
 };
 
 describe('menu cart keys', () => {
   it('round-trips the customer and drinks', () => {
     expect(cartKey).toBe('c1:latte+black_coffee');
-    expect(parseCartKey(cartKey).items.map((i) => i.name)).toEqual(['Latte', 'Black coffee']);
+    expect(parseCartKey(cartKey).items.map((i) => i.name)).toEqual([
+      'Latte',
+      'Black coffee',
+    ]);
   });
 });
 
@@ -75,19 +116,32 @@ describe('mapRun', () => {
   it('produces contract-valid rows', () => {
     expect(checkRun(data)).toEqual([]);
     expect(data.layout.agents.map((a) => a.id)).toEqual([
-      'cashier1', 'cashier2', 'barista1', 'barista2', 'server1', 'server2', 'cleaner1',
+      'cashier1',
+      'cashier2',
+      'barista1',
+      'barista2',
+      'server1',
+      'server2',
+      'cleaner1',
     ]);
   });
 
   it('groups a cart into one customer with its drinks', () => {
     expect(data.jobs).toHaveLength(1);
     const job = data.jobs[0];
-    expect(job).toMatchObject({ id: 'c1', label: 'Latte + Black coffee', arrival: 10, deadline: 98 });
+    expect(job).toMatchObject({
+      id: 'c1',
+      label: 'Latte + Black coffee',
+      arrival: 10,
+      deadline: 98,
+    });
   });
 
   it('completes the customer when the last drink is delivered', () => {
     const done = data.events.filter((e) => e.type === 'job.completed');
-    expect(done).toEqual([expect.objectContaining({ t: 33, jobId: 'c1', data: { onTime: true } })]);
+    expect(done).toEqual([
+      expect.objectContaining({ t: 33, jobId: 'c1', data: { onTime: true } }),
+    ]);
   });
 
   it('maps decisions to assign rows with score and reasons', () => {
@@ -102,7 +156,11 @@ describe('mapRun', () => {
 
   it('marks planning time as not measured without coordinator samples', () => {
     expect(data.score?.planningMs).toBeNull();
-    expect(data.score).toMatchObject({ completedInT: 1, lateCount: 0, totalJobs: 1 });
+    expect(data.score).toMatchObject({
+      completedInT: 1,
+      lateCount: 0,
+      totalJobs: 1,
+    });
   });
 
   it('moves the customer to waiting only after the last register task', () => {
@@ -121,14 +179,36 @@ describe('mapRun with one engine order holding several drinks', () => {
     { name: 'Black coffee', complexity: 'simple' },
   ]);
   let id = 500n;
-  const t = (kind: string, role: string, w: bigint, s: number, f: number): TaskRow => ({
-    id: id++, runId: 1n, orderId: 21n, kind, role, workerId: w,
-    startedTick: s, finishedTick: f, finishAtTick: f, durationTicks: f - s,
+  const t = (
+    kind: string,
+    role: string,
+    w: bigint,
+    s: number,
+    f: number,
+  ): TaskRow => ({
+    id: id++,
+    runId: 1n,
+    orderId: 21n,
+    kind,
+    role,
+    workerId: w,
+    startedTick: s,
+    finishedTick: f,
+    finishAtTick: f,
+    durationTicks: f - s,
   });
   const rows2: RunRows = {
     run: { id: 1n, name: 'Low-2 · SYNC', seed: 5, tick: 40, status: 'running' },
     orders: [
-      { id: 21n, runId: 1n, cartKey: key, recipe: 'latte', arrivalTick: 10, deadlineTick: 98, deliveredTick: 34 },
+      {
+        id: 21n,
+        runId: 1n,
+        cartKey: key,
+        recipe: 'latte',
+        arrivalTick: 10,
+        deadlineTick: 98,
+        deliveredTick: 34,
+      },
     ],
     // Creation order: order tasks, then per drink coffee (+ milk) and assembly.
     tasks: [
@@ -152,10 +232,14 @@ describe('mapRun with one engine order holding several drinks', () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain('c1.prepare_coffee.1');
     expect(ids).toContain('c1.prepare_coffee.2');
-    expect(data.tasks.find((x) => x.id === 'c1.assemble_drink.2')?.label).toBe('Make drink (2/2)');
+    expect(data.tasks.find((x) => x.id === 'c1.assemble_drink.2')?.label).toBe(
+      'Make drink (2/2)',
+    );
     // One order task and one payment for the customer.
     expect(data.tasks.filter((x) => x.type === 'register')).toHaveLength(2);
-    expect(data.tasks.find((x) => x.id === 'c1.capture_order.1')?.label).toBe('Take order');
+    expect(data.tasks.find((x) => x.id === 'c1.capture_order.1')?.label).toBe(
+      'Take order',
+    );
     expect(checkRun(data)).toEqual([]);
   });
 
@@ -166,4 +250,46 @@ describe('mapRun with one engine order holding several drinks', () => {
     expect(data.events.find((e) => e.type === 'job.completed')?.t).toBe(34);
     expect(data.jobs[0].label).toBe('Latte + Black coffee');
   });
+});
+
+it('cup preparation does not call a customer to pickup, and retries use authoritative current cost', () => {
+  const prep = task(11n, 'prepare_cups', 'server', 21n, 17, 20);
+  const data = mapRun(
+    {
+      ...rows,
+      tasks: [...rows.tasks, prep],
+      metrics: {
+        runId: 1n,
+        reportedCoordinatorMs: 0,
+        coordinatorSampleCount: 0,
+        modeledSpentMicrousd: 166000n,
+      },
+    },
+    'sync',
+  );
+  expect(sceneAt(data, 18).customers[0].stage).toBe('waiting');
+  expect(
+    data.tasks.find((t) => t.id.includes('prepare_cups'))?.customerHandoff,
+  ).toBe(false);
+  expect(data.scoreTimeline?.at(-1)?.execCost).toBe(0.166);
+});
+it('shared task membership and dependency edges survive mapping without duplicating execution', () => {
+  const shared = { ...rows.tasks[4], orderIds: [11n, 12n] };
+  const data = mapRun(
+    {
+      ...rows,
+      tasks: [...rows.tasks.filter((t) => t.id !== shared.id), shared],
+      edges: [{ fromTaskId: rows.tasks[2].id, toTaskId: shared.id }],
+    },
+    'sync',
+  );
+  const mapped = data.tasks.find((t) => t.label.includes('[2 drinks]'))!;
+  expect(mapped.jobIds).toEqual(['c1']);
+  expect(mapped.deps).toHaveLength(1);
+  expect(
+    data.events.filter(
+      (e) => e.taskId === mapped.id && e.type === 'task.started',
+    ),
+  ).toHaveLength(1);
+  expect(checkRun(data)).toEqual([]);
 });

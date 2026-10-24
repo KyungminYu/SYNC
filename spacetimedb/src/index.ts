@@ -2,6 +2,9 @@ export { db as default } from './tables.ts';
 export {
   set_resource_capacity,
   set_modeled_budget,
+  enqueue_cart,
+  request_job_cancellation,
+  report_agent_result,
   create_run,
   grant_member,
   set_run_status,
@@ -31,4 +34,5 @@ export {
   ui_metrics,
   ui_policy_catalog,
   service_jobs,
+  service_workers,
 } from './runtime/views.ts';

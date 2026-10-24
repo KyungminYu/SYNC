@@ -153,23 +153,21 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
     const sends: Promise<void>[] = [];
     for (const c of arrivals.filter((c) => c.tick === tick))
       for (const runId of ids)
-        for (const [k, item] of c.items.entries()) {
-          const entry = menuByName(item.name);
-          if (!entry) throw new Error(`No engine recipe for "${item.name}"`);
-          sends.push(
-            conn.reducers.enqueueOrder({
-              runId,
-              externalKey: `${c.id}-${k + 1}`,
-              cartKey: cartKeyFor(c.id, c.items),
-              recipe: entry.recipe,
-              deadlineInTicks: DEADLINE_FROM_DOOR - WALK_IN,
-              value: 1,
-              priority: 0,
-              // The customer leaves with the drinks at once; the tray is free right away.
-              customerUseTicks: 0,
+        sends.push(
+          conn.reducers.enqueueCart({
+            runId,
+            cartKey: cartKeyFor(c.id, c.items),
+            items: c.items.map((item) => {
+              const entry = menuByName(item.name);
+              if (!entry) throw new Error('Unknown menu recipe');
+              return { recipe: entry.recipe, quantity: 1 };
             }),
-          );
-        }
+            deadlineInTicks: DEADLINE_FROM_DOOR - WALK_IN,
+            value: 1,
+            priority: 0,
+            customerUseTicks: 0,
+          }),
+        );
     await Promise.all(sends);
     timing.mark('enqueue');
     if (!closed && tick >= lastArrival) {
@@ -201,13 +199,17 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
         `tick ${tick}: ${ids.map((id) => `${id}=${status(id)?.status}`).join(' ')}`,
       );
     // How late this tick finished against the global clock (0 = on time).
-    timing.note('behind', Math.max(0, Date.now() - (startedAt + (tick + 1) * tickMs)));
+    timing.note(
+      'behind',
+      Math.max(0, Date.now() - (startedAt + (tick + 1) * tickMs)),
+    );
     // Wait for the next tick's due time on the global clock; when behind
     // (the engine was slow), go on at once and catch up.
     await sleep(Math.max(0, startedAt + (tick + 1) * tickMs - Date.now()));
     timing.mark('sleep');
     timing.end();
-    if (tick > 0 && tick % 60 === 0) log(timing.summary(`ticks ${tick - 59}-${tick}`));
+    if (tick > 0 && tick % 60 === 0)
+      log(timing.summary(`ticks ${tick - 59}-${tick}`));
   }
   log(timing.summary('all ticks'));
   return { baseline: ids[0], sync: ids[1] };
@@ -242,7 +244,8 @@ class TickTiming {
     this.window = [];
     const stat = (k: string) => {
       const v = rows.map((r) => r[k] ?? 0).sort((a, b) => a - b);
-      const q = (p: number) => v[Math.min(v.length - 1, Math.floor(p * v.length))] ?? 0;
+      const q = (p: number) =>
+        v[Math.min(v.length - 1, Math.floor(p * v.length))] ?? 0;
       return `${k} ${q(0.5).toFixed(0)}/${q(0.95).toFixed(0)}/${(v.at(-1) ?? 0).toFixed(0)}`;
     };
     return `timing ${label} (p50/p95/max ms): ${['tick', 'enqueue', 'step', 'confirm', 'sleep', 'behind'].map(stat).join(' · ')}`;

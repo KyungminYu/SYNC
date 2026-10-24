@@ -1,5 +1,6 @@
 # SYNC database schema and UI contract
 
+Current cart/external-worker changes supersede the earlier placeholder/frontier-only descriptions below. See [Cart execution](CART_EXECUTION.md) for the current contract and migration notes.
 This document describes the source bundle, not a generic future schema. Its authoritative definitions are `spacetimedb/src/tables.ts`, `domain/model.ts`, `runtime/reducers.ts`, and `runtime/views.ts`.
 
 The supplied _Problem_Formulation_and_Solution.pdf_ grounds the generic requirements: dynamically revealed tasks, compatibility, dependencies, shared capacity, online scheduling, atomic admission, attempt fencing, and honest coordination-cost evaluation. The coffee recipes, serving-tray lifecycle, illustrative durations, and seven-worker demo configuration are domain-adapter decisions from the project discussion; they are not claims extracted from that generic PDF.

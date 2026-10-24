@@ -207,6 +207,9 @@ export function sceneAt(
   const spotHolder: (string | undefined)[] = lanes.waitingSpots.map(
     () => undefined,
   );
+  const preparationOnly = new Set(
+    data.tasks.filter((t) => t.customerHandoff === false).map((t) => t.id),
+  );
   const jobOf = (e: SyncEvent) =>
     e.jobId ?? (e.taskId ? e.taskId.split('.')[0] : undefined);
 
@@ -254,6 +257,7 @@ export function sceneAt(
         if (
           customer &&
           type === 'pickup' &&
+          !preparationOnly.has(e.taskId!) &&
           customer.stage !== 'ready' &&
           customer.stage !== 'leaving'
         ) {
@@ -336,39 +340,49 @@ export function sceneAt(
 
   // Staff: walk along the staff aisle (vertical, horizontal, vertical) over the
   // move's eta; state priority working > waiting > moving > idle.
-  const agentViews: AgentView[] = layout.agents.map((a) => {
-    const s = agents.get(a.id)!;
-    let pos: Point = { x: a.startX, y: a.startY };
-    let moving = false;
-    const m = s.move?.data;
-    if (s.move && m) {
-      const from = { x: m.fromX ?? a.startX, y: m.fromY ?? a.startY };
-      const route = viaRow(from, { x: m.toX!, y: m.toY! }, lanes.staffAisleY);
-      const k = m.eta ? Math.min(1, Math.max(0, (t - s.move.t) / m.eta)) : 1;
-      pos = pointAt(route, k * pathLength(route));
-      moving = k < 1;
-    }
-    const type = s.task ? taskType.get(s.task) : undefined;
-    const slot = slotViews.find(
-      (v) => v.state === 'busy' && slots.get(v.id)!.busy?.agentId === a.id,
-    );
-    return {
-      id: a.id,
-      name: a.name,
-      role: a.role,
-      ...pos,
-      state: s.working
-        ? 'working'
-        : s.waiting
-          ? 'waiting'
-          : moving
-            ? 'moving'
-            : 'idle',
-      helping: type !== undefined && !a.primaryTypes.includes(type),
-      progress: s.working ? (slot?.progress ?? null) : null,
-      facing: 'down' as Facing,
-    };
-  });
+  const agentViews: AgentView[] = layout.agents
+    .filter((a) => a.enabled !== false || agents.get(a.id)?.working)
+    .map((a) => {
+      const s = agents.get(a.id)!;
+      let pos: Point = { x: a.startX, y: a.startY };
+      let moving = false;
+      const m = s.move?.data;
+      if (s.move && m) {
+        const from = { x: m.fromX ?? a.startX, y: m.fromY ?? a.startY };
+        const route = viaRow(from, { x: m.toX!, y: m.toY! }, lanes.staffAisleY);
+        const k = m.eta ? Math.min(1, Math.max(0, (t - s.move.t) / m.eta)) : 1;
+        pos = pointAt(route, k * pathLength(route));
+        moving = k < 1;
+      }
+      const type = s.task ? taskType.get(s.task) : undefined;
+      const slot = slotViews.find(
+        (v) => v.state === 'busy' && slots.get(v.id)!.busy?.agentId === a.id,
+      );
+      if (s.working && slot) {
+        const location = resources.get(slot.id);
+        if (location)
+          pos = {
+            x: location.standX ?? location.x,
+            y: location.standY ?? location.y,
+          };
+      }
+      return {
+        id: a.id,
+        name: a.name,
+        role: a.role,
+        ...pos,
+        state: s.working
+          ? 'working'
+          : s.waiting
+            ? 'waiting'
+            : moving
+              ? 'moving'
+              : 'idle',
+        helping: type !== undefined && !a.primaryTypes.includes(type),
+        progress: s.working ? (slot?.progress ?? null) : null,
+        facing: 'down' as Facing,
+      };
+    });
 
   const jobs = new Map(data.jobs.map((j) => [j.id, j]));
   const counterAt = (id?: string): Point => ({
@@ -511,7 +525,8 @@ export function sceneAt(
     // Still outside, waiting for the one ahead to step in: not drawn
     // (customers never stand stacked on the doorway). This holds even when a
     // free register calls them straight away (group arrivals, two cashiers).
-    if ((c.stage === 'line' || c.stage === 'ordering') && t < c.entered!) return;
+    if ((c.stage === 'line' || c.stage === 'ordering') && t < c.entered!)
+      return;
     if (c.stage === 'line') {
       // Standing in (or walking into) the line.
       inLine++;
@@ -528,7 +543,8 @@ export function sceneAt(
       // Several customers ordering at one register (the cashier alternates
       // between their drinks) stand side by side: 0, −0.8, +0.8, −1.6 …
       const rank = (orderingAt.get(c.register ?? '') ?? []).indexOf(id);
-      const shift = rank <= 0 ? 0 : (rank % 2 ? -1 : 1) * Math.ceil(rank / 2) * 0.8;
+      const shift =
+        rank <= 0 ? 0 : (rank % 2 ? -1 : 1) * Math.ceil(rank / 2) * 0.8;
       const base = counterAt(c.register);
       const reg = { ...base, x: base.x + shift };
       const toHead =
@@ -621,7 +637,12 @@ export function peakLine(data: RunData) {
   for (const e of data.events) {
     if (e.type === 'job.arrived' && e.jobId) changes.push([e.t, 1]);
     const job = e.taskId?.split('.')[0];
-    if (e.type === 'task.started' && job && type.get(e.taskId!) === 'register' && !started.has(job)) {
+    if (
+      e.type === 'task.started' &&
+      job &&
+      type.get(e.taskId!) === 'register' &&
+      !started.has(job)
+    ) {
       started.add(job);
       changes.push([e.t, -1]);
     }
@@ -654,7 +675,11 @@ export function peakWaiting(data: RunData) {
         now++;
       }
     }
-    if (e.type === 'task.started' && t.type === 'pickup') {
+    if (
+      e.type === 'task.started' &&
+      t.type === 'pickup' &&
+      t.customerHandoff !== false
+    ) {
       if (state.get(t.jobId) === 'waiting') now--;
       state.set(t.jobId, 'called');
     }
@@ -705,8 +730,7 @@ function applyFacing(
       // Rows alternate direction; everyone faces toward the head of the line.
       const row = lanes.queueRowsY.findIndex((y) => near(c.y, y));
       c.facing = row < 0 ? 'up' : row % 2 === 0 ? 'left' : 'right';
-    }
-    else c.facing = 'up';
+    } else c.facing = 'up';
   }
 }
 
@@ -714,6 +738,7 @@ function applyFacing(
 function registerCounts(data: RunData) {
   const counts = new Map<string, number>();
   for (const t of data.tasks)
-    if (t.type === 'register') counts.set(t.jobId, (counts.get(t.jobId) ?? 0) + 1);
+    if (t.type === 'register')
+      counts.set(t.jobId, (counts.get(t.jobId) ?? 0) + 1);
   return counts;
 }

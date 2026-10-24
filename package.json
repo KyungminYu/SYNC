@@ -27,7 +27,9 @@
     "test:domain": "node scripts/test-domain.mjs",
     "test:module": "vitest run",
     "db:login": "node scripts/db.mjs login",
-    "db:describe": "node scripts/db.mjs describe"
+    "db:describe": "node scripts/db.mjs describe",
+    "benchmark": "tsx scripts/benchmark.ts",
+    "agents:demo": "tsx scripts/external-demo.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

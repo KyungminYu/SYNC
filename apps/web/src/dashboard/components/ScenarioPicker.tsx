@@ -154,7 +154,7 @@ export function ScenarioPicker({
                     </span>
                     {o.meta && <span className="meta">{o.meta}</span>}
                   </button>
-                  {onRun && (
+                  {onRun && o.canRun !== false && (
                     <button
                       className={running(o) && onStop ? 'run stop' : 'run'}
                       disabled={

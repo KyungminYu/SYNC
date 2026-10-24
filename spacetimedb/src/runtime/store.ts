@@ -57,6 +57,7 @@ export function load(store: ReadDb, runId: bigint): State {
         Object.entries(r).map(([k, v]) => [k, Array.isArray(v) ? [...v] : v]),
       ),
     );
+    rows.sort((a, b) => ((a.id as bigint) < (b.id as bigint) ? -1 : 1));
     Object.assign(state, { [table]: rows });
   }
   return state;
@@ -81,6 +82,8 @@ function saveTable<T extends Base>(
 }
 export function save(store: MutableDb, state: State): void {
   store.run.id.update(state.run);
+  saveTable(store.taskItems, state.taskItems, state.run.id);
+  saveTable(store.utensils, state.utensils, state.run.id);
   saveTable(store.planner, state.planner, state.run.id);
   // Explicit calls preserve row/table correlation under strict TypeScript.
   saveTable(store.members, state.members, state.run.id);

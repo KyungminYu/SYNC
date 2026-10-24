@@ -37,12 +37,14 @@ export interface RunRow {
   seed: number;
   tick: number;
   status: string;
+  mode?: string;
 }
 export interface OrderRow {
   id: bigint;
   runId: bigint;
   cartKey: string;
-  recipe: string;
+  recipeKey?: string;
+  recipe?: string;
   arrivalTick: number;
   deadlineTick: number;
   deliveredTick?: number;
@@ -51,6 +53,7 @@ export interface TaskRow {
   id: bigint;
   runId: bigint;
   orderId: bigint;
+  orderIds?: bigint[];
   kind: string;
   role: string;
   workerId?: bigint;
@@ -58,12 +61,15 @@ export interface TaskRow {
   finishedTick?: number;
   finishAtTick?: number;
   durationTicks: number;
+  attempt?: number;
+  estimatedCostMicrousd?: bigint;
 }
 export interface WorkerRow {
   id: bigint;
   runId: bigint;
   label: string;
   role: string;
+  enabled?: boolean;
 }
 export interface DecisionRow {
   runId: bigint;
@@ -79,6 +85,8 @@ export interface MetricsRow {
   runId: bigint;
   reportedCoordinatorMs: number;
   coordinatorSampleCount: number;
+  modeledSpentMicrousd?: bigint;
+  netReward?: number;
 }
 
 /** Every row of one run. */
@@ -89,6 +97,7 @@ export interface RunRows {
   workers: WorkerRow[];
   decisions: DecisionRow[];
   metrics?: MetricsRow;
+  edges?: { fromTaskId: bigint; toTaskId: bigint }[];
 }
 
 /** Horizon T of objective (20) in ticks (1 tick = 1 scenario second). */
@@ -106,12 +115,18 @@ const TASK_LABEL: Record<string, string> = {
   collect_tray: 'Collect tray',
   clean_tray: 'Clean tray',
   return_tray: 'Return tray',
+  prepare_cups: 'Prepare cups',
+  wash_pitcher: 'Wash pitcher',
 };
 
 const isRole = (r: string): r is Role => r in ROLE_TYPE;
 
 /** Engine tasks made once per drink; the others are once per order. */
-const DRINK_TASKS = new Set(['prepare_coffee', 'prepare_milk', 'assemble_drink']);
+const DRINK_TASKS = new Set([
+  'prepare_coffee',
+  'prepare_milk',
+  'assemble_drink',
+]);
 
 /** "Latte ×2 + Black coffee" from the drink names. */
 function orderLabel(names: string[]) {
@@ -141,6 +156,7 @@ function liveLayout(workers: WorkerRow[]) {
       id,
       name: `${ROLE_NAME[role]} ${index + 1}`,
       role: role,
+      enabled: w.enabled ?? true,
       primaryTypes: [ROLE_TYPE[role]],
       startX: slot.standX ?? slot.x,
       startY: slot.standY ?? slot.y,
@@ -205,7 +221,14 @@ export function mapRun(
   /** order id → [customer id, drink index, drink count]. */
   const orderInfo = new Map<string, [string, number, number]>();
   for (const [key, orders] of carts) {
-    const { customerId, items } = parseCartKey(key);
+    const parsed = parseCartKey(key);
+    const customerId =
+      [...carts.keys()].filter(
+        (k) => parseCartKey(k).customerId === parsed.customerId,
+      ).length > 1
+        ? key
+        : parsed.customerId;
+    const items = parsed.items;
     orders.forEach((o, k) =>
       orderInfo.set(String(o.id), [customerId, k, orders.length]),
     );
@@ -220,7 +243,7 @@ export function mapRun(
       label: orderLabel(
         items.length >= orders.length
           ? items.map((i) => i.name)
-          : orders.map((o) => o.recipe),
+          : orders.map((o) => o.recipeKey ?? o.recipe ?? 'Unknown'),
       ),
       arrival,
       deadline: Math.min(...orders.map((o) => o.deadlineTick)),
@@ -228,7 +251,10 @@ export function mapRun(
       items:
         items.length >= orders.length
           ? items
-          : orders.map((o) => ({ name: o.recipe, complexity: 'medium' })),
+          : orders.map((o) => ({
+              name: o.recipeKey ?? o.recipe ?? 'Unknown',
+              complexity: 'medium',
+            })),
       serviceTaskId: '',
       taskIds: [],
     });
@@ -246,7 +272,10 @@ export function mapRun(
   const drinksOf = new Map<string, number>();
   for (const r of taskRows)
     if (r.kind === 'prepare_coffee')
-      drinksOf.set(String(r.orderId), (drinksOf.get(String(r.orderId)) ?? 0) + 1);
+      drinksOf.set(
+        String(r.orderId),
+        (drinksOf.get(String(r.orderId)) ?? 0) + 1,
+      );
   /** Drinks in the customer's earlier orders, and drinks per customer. */
   const drinksBefore = new Map<string, number>();
   const drinksTotal = new Map<string, number>();
@@ -255,7 +284,10 @@ export function mapRun(
       const customerId = orderInfo.get(String(o.id))![0];
       const sofar = drinksTotal.get(customerId) ?? 0;
       drinksBefore.set(String(o.id), sofar);
-      drinksTotal.set(customerId, sofar + Math.max(1, drinksOf.get(String(o.id)) ?? 1));
+      drinksTotal.set(
+        customerId,
+        sofar + Math.max(1, drinksOf.get(String(o.id)) ?? 1),
+      );
     }
   /** Current drink while walking an order's tasks in creation order. */
   const drinkAt = new Map<string, number>();
@@ -264,31 +296,91 @@ export function mapRun(
     if (!info || !isRole(r.role)) continue;
     const [customerId, k, count] = info;
     const key = String(r.orderId);
-    if (r.kind === 'prepare_coffee') drinkAt.set(key, (drinkAt.get(key) ?? -1) + 1);
+    if (r.kind === 'prepare_coffee')
+      drinkAt.set(key, (drinkAt.get(key) ?? -1) + 1);
     const perDrink = DRINK_TASKS.has(r.kind);
-    const drink = (drinksBefore.get(key) ?? 0) + Math.max(0, drinkAt.get(key) ?? 0);
+    const drink =
+      (drinksBefore.get(key) ?? 0) + Math.max(0, drinkAt.get(key) ?? 0);
     const total = drinksTotal.get(customerId) ?? count;
     const single = (drinksOf.get(key) ?? 1) <= 1;
     const id = perDrink
       ? `${customerId}.${r.kind}.${drink + 1}`
       : `${customerId}.${r.kind}.${k + 1}`;
     // Drink tasks name their drink; order tasks only when the order is one drink.
-    const n = perDrink ? drink : single ? (drinksBefore.get(key) ?? 0) : undefined;
+    const n = perDrink
+      ? drink
+      : single
+        ? (drinksBefore.get(key) ?? 0)
+        : undefined;
     const label =
       (TASK_LABEL[r.kind] ?? r.kind) +
       (n !== undefined && total > 1 ? ` (${n + 1}/${total})` : '');
     tasks.push({
       id,
       jobId: customerId,
-      label,
+      jobIds: [
+        ...new Set(
+          (r.orderIds ?? [r.orderId])
+            .map((id) => orderInfo.get(String(id))?.[0])
+            .filter((id): id is string => !!id),
+        ),
+      ],
+      label:
+        label +
+        ((r.orderIds?.length ?? 0) > 1
+          ? ` [${r.orderIds!.length} drinks]`
+          : ''),
       type: ROLE_TYPE[r.role],
+      customerHandoff: r.kind !== 'prepare_cups',
       deps: [],
       ...(n === undefined ? {} : { itemIndex: n }),
     });
     taskId.set(String(r.id), id);
     const job = jobById.get(customerId)!;
     job.taskIds.push(id);
+    for (const memberId of r.orderIds ?? []) {
+      const customer = orderInfo.get(String(memberId))?.[0];
+      const member = customer ? jobById.get(customer) : undefined;
+      if (member && !member.taskIds.includes(id)) member.taskIds.push(id);
+    }
     if (r.kind === 'deliver_order') job.serviceTaskId = id;
+  }
+
+  for (const edge of rows.edges ?? []) {
+    const successor = tasks.find(
+      (t) => t.id === taskId.get(String(edge.toTaskId)),
+    );
+    const predecessor = taskId.get(String(edge.fromTaskId));
+    if (successor && predecessor && !successor.deps.includes(predecessor))
+      successor.deps.push(predecessor);
+  }
+  const taskPlaces = new Map<string, { agentId: string; resourceId: string }>();
+  const busyUntil = new Map<string, number>();
+  for (const task of [...taskRows].sort(
+    (a, b) => (a.startedTick ?? Infinity) - (b.startedTick ?? Infinity),
+  )) {
+    const home =
+      task.workerId === undefined
+        ? undefined
+        : slotOf.get(String(task.workerId));
+    if (!home || task.startedTick === undefined || !isRole(task.role)) continue;
+    const type = ROLE_TYPE[task.role];
+    const choices = layout.resources.filter((r) => r.type === type);
+    const station =
+      choices.find(
+        (r) =>
+          r.id === home.resourceId &&
+          (busyUntil.get(r.id) ?? 0) <= task.startedTick!,
+      ) ??
+      choices.find((r) => (busyUntil.get(r.id) ?? 0) <= task.startedTick!) ??
+      choices[0];
+    if (station) {
+      taskPlaces.set(String(task.id), {
+        agentId: home.agentId,
+        resourceId: station.id,
+      });
+      busyUntil.set(station.id, task.finishedTick ?? Infinity);
+    }
   }
 
   // Events from task timestamps. Same-tick order: arrivals, finishes and
@@ -309,23 +401,30 @@ export function mapRun(
     raw.push({ t: job.arrival, type: 'job.arrived', jobId: job.id });
   for (const r of taskRows) {
     const id = taskId.get(String(r.id));
-    const where = r.workerId !== undefined ? slotOf.get(String(r.workerId)) : undefined;
+    const where = taskPlaces.get(String(r.id));
     if (!id || r.startedTick === undefined || !where) continue;
-    const base = { taskId: id, agentId: where.agentId, resourceId: where.resourceId };
+    const base = {
+      taskId: id,
+      agentId: where.agentId,
+      resourceId: where.resourceId,
+    };
     raw.push({ t: r.startedTick, type: 'task.assigned', ...base });
     raw.push({
       t: r.startedTick,
       type: 'task.started',
       ...base,
-      data: { duration: (r.finishAtTick ?? r.startedTick + r.durationTicks) - r.startedTick },
+      data: {
+        duration:
+          (r.finishAtTick ?? r.startedTick + r.durationTicks) - r.startedTick,
+      },
     });
     if (r.finishedTick !== undefined)
       raw.push({ t: r.finishedTick, type: 'task.finished', ...base });
   }
   // A customer is done when every drink has been delivered (one hand-off per customer).
-  for (const [key, orders] of carts) {
+  for (const orders of carts.values()) {
     if (orders.some((o) => o.deliveredTick === undefined)) continue;
-    const { customerId } = parseCartKey(key);
+    const customerId = orderInfo.get(String(orders[0].id))![0];
     const job = jobById.get(customerId)!;
     const t = Math.max(...orders.map((o) => o.deliveredTick!));
     raw.push({
@@ -339,9 +438,7 @@ export function mapRun(
     .map((e, i) => ({ e, i }))
     .sort(
       (a, b) =>
-        a.e.t - b.e.t ||
-        PRIORITY[a.e.type] - PRIORITY[b.e.type] ||
-        a.i - b.i,
+        a.e.t - b.e.t || PRIORITY[a.e.type] - PRIORITY[b.e.type] || a.i - b.i,
     )
     .map(({ e }, i) => ({ seq: i + 1, ...e }));
 
@@ -350,12 +447,16 @@ export function mapRun(
   const decisions: Decision[] = [];
   for (const d of rows.decisions) {
     const id = taskId.get(String(d.taskId));
-    const where = slotOf.get(String(d.workerId));
+    const where =
+      taskPlaces.get(String(d.taskId)) ?? slotOf.get(String(d.workerId));
     const task = id ? taskById.get(id) : undefined;
     if (!task || !where) continue;
     const slotLabel =
-      layout.resources.find((r) => r.id === where.resourceId)?.label ?? where.resourceId;
-    const primary: ResourceType | undefined = resourceType.get(where.resourceId);
+      layout.resources.find((r) => r.id === where.resourceId)?.label ??
+      where.resourceId;
+    const primary: ResourceType | undefined = resourceType.get(
+      where.resourceId,
+    );
     decisions.push({
       id: `d${d.sequence}`,
       t: d.tick,
@@ -401,7 +502,32 @@ export function mapRun(
       : null;
   data.scoreTimeline = [];
   for (let s = 0; s <= now; s++)
-    data.scoreTimeline.push({ t: s, ...scoreAt(data, s, planningMs) } as TimedScore);
+    data.scoreTimeline.push({
+      t: s,
+      ...scoreAt(data, s, planningMs),
+    } as TimedScore);
   data.score = scoreAt(data, now, planningMs);
+  for (const score of data.scoreTimeline) {
+    score.execCost = rows.tasks.some(
+      (t) => t.estimatedCostMicrousd !== undefined,
+    )
+      ? rows.tasks
+          .filter(
+            (t) => t.finishedTick !== undefined && t.finishedTick <= score.t,
+          )
+          .reduce(
+            (n, t) => n + Number(t.estimatedCostMicrousd ?? 0n) / 1000000,
+            0,
+          )
+      : null;
+  }
+  data.score.execCost =
+    rows.metrics?.modeledSpentMicrousd === undefined
+      ? null
+      : Number(rows.metrics.modeledSpentMicrousd) / 1000000;
+  data.score.objectiveValue = rows.metrics?.netReward;
+  if (data.scoreTimeline.length)
+    data.scoreTimeline[data.scoreTimeline.length - 1].execCost =
+      data.score.execCost;
   return data;
 }

@@ -76,10 +76,17 @@ test('forecasts are advisory and dependent tasks never start predictively', () =
   }[];
   assert.ok(plan.some((p) => p.startTick > s.run.tick));
   for (const p of plan.filter((p) => p.startTick > s.run.tick))
-    assert.equal(
-      s.tasks.find((t) => t.id === BigInt(p.taskId))!.status,
-      'ready',
+    assert.ok(
+      ['ready', 'blocked'].includes(
+        s.tasks.find((t) => t.id === BigInt(p.taskId))!.status,
+      ),
     );
+  assert.ok(
+    plan.some(
+      (p) =>
+        s.tasks.find((t) => t.id === BigInt(p.taskId))!.status === 'blocked',
+    ),
+  );
   for (const d of s.dependencies)
     if (s.tasks.find((t) => t.id === d.predecessorId)!.status !== 'succeeded')
       assert.equal(

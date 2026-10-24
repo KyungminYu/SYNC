@@ -34,3 +34,19 @@ it('never pairs a rerun with the previous counterpart and retains completed samp
   expect(scenariosOf(runs)[0].runs.sync).toBeUndefined();
   expect(scenariosOf(runs, true)[0].runs.sync?.id).toBe(2n);
 });
+
+it('shows authorized external runs independently of paired scenario names', () => {
+  const run = {
+    id: 42n,
+    name: 'External demo',
+    seed: 5,
+    tick: 100,
+    status: 'completed',
+    mode: 'claude',
+  };
+  expect(scenariosOf([run], true)[0]).toMatchObject({
+    id: 'External-42',
+    load: 'External workers',
+    runs: { sync: run },
+  });
+});

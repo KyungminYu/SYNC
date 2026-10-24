@@ -23,6 +23,7 @@ const QUERIES = [
   'SELECT * FROM ui_runs',
   'SELECT * FROM ui_orders',
   'SELECT * FROM ui_tasks',
+  'SELECT * FROM ui_dag_edges',
   'SELECT * FROM ui_workers',
   'SELECT * FROM ui_decisions',
   'SELECT * FROM ui_metrics',
@@ -66,7 +67,16 @@ export function scenariosOf(runs: RunRow[], completedOnly = false): Scenario[] {
   const byId = new Map<string, Scenario>();
   for (const run of runs) {
     const p = parseRunName(run.name);
-    if (!p) continue;
+    if (!p) {
+      if (run.mode === 'claude')
+        byId.set(`external:${run.id}`, {
+          id: `External-${run.id}`,
+          load: 'External workers',
+          n: Number(run.id),
+          runs: { sync: run },
+        });
+      continue;
+    }
     const groupKey = `${p.scenario}:${p.batch ?? 'legacy'}`;
     const s = byId.get(groupKey) ?? {
       id: p.scenario,
@@ -93,8 +103,10 @@ export function scenariosOf(runs: RunRow[], completedOnly = false): Scenario[] {
 }
 
 const done = (s: Scenario) =>
-  s.runs.baseline?.status === 'completed' &&
-  s.runs.sync?.status === 'completed';
+  s.load === 'External workers'
+    ? s.runs.sync?.status === 'completed'
+    : s.runs.baseline?.status === 'completed' &&
+      s.runs.sync?.status === 'completed';
 /** Highest run id in a scenario: the most recently created one. */
 const newestId = (s: Scenario) =>
   [s.runs.baseline?.id ?? 0n, s.runs.sync?.id ?? 0n].reduce((a, b) =>
@@ -144,7 +156,10 @@ export class SpacetimeSyncSource implements SyncSource {
     const current = () => this.generation === generation;
     this.set({ status: { kind: 'connecting' }, runs: {} });
     if (this.mode === 'live')
-      this.stallTimer = setInterval(() => current() && this.schedule(), STALL_MS / 2);
+      this.stallTimer = setInterval(
+        () => current() && this.schedule(),
+        STALL_MS / 2,
+      );
     this.conn = DbConnection.builder()
       .withUri(env.VITE_SPACETIMEDB_URI)
       .withDatabaseName(env.VITE_SPACETIMEDB_DATABASE)
@@ -174,6 +189,7 @@ export class SpacetimeSyncSource implements SyncSource {
           db.uiRuns,
           db.uiOrders,
           db.uiTasks,
+          db.uiDagEdges,
           db.uiWorkers,
           db.uiDecisions,
           db.uiMetrics,
@@ -289,6 +305,7 @@ export class SpacetimeSyncSource implements SyncSource {
       run,
       orders: orders.filter((o) => o.runId === run.id),
       tasks: tasks.filter((t) => t.runId === run.id),
+      edges: [...db.uiDagEdges.iter()].filter((e) => e.runId === run.id),
       workers: workers.filter((w) => w.runId === run.id),
       decisions: [...(this.decisions.get(String(run.id))?.values() ?? [])],
       metrics: metrics.find((m) => m.runId === run.id),
@@ -305,7 +322,9 @@ export class SpacetimeSyncSource implements SyncSource {
       const seen = this.progress.get(s.id);
       if (!seen) this.progress.set(s.id, { tick, at: firstLoad ? 0 : now });
       else if (seen.tick !== tick) this.progress.set(s.id, { tick, at: now });
-      return now - this.progress.get(s.id)!.at > STALL_MS ? 'stopped' : 'running';
+      return now - this.progress.get(s.id)!.at > STALL_MS
+        ? 'stopped'
+        : 'running';
     };
     const runs: SyncSnapshot['runs'] = {};
     // A stopped scenario no longer moves: show it like a finished one
@@ -315,7 +334,9 @@ export class SpacetimeSyncSource implements SyncSource {
       const run = chosen?.runs[p];
       if (!run) continue;
       const data = mapRun(rowsFor(run), p, undefined, chosen.id);
-      runs[p] = stopped ? { ...data, run: { ...data.run, status: 'finished' } } : data;
+      runs[p] = stopped
+        ? { ...data, run: { ...data.run, status: 'finished' } }
+        : data;
     }
     // Dropdown entries: "Mid-2" with its state and tick. Runs sit paused
     // between feeder steps, so an unfinished pair counts as running until its
@@ -326,6 +347,7 @@ export class SpacetimeSyncSource implements SyncSource {
         id: s.id,
         label: s.id,
         group: s.load,
+        canRun: s.load !== 'External workers',
         meta: `${state(s)} · tick ${run.tick}`,
       };
     });

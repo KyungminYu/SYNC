@@ -46,9 +46,9 @@ Choose an available database name if that name is taken. After successful public
 
 ## Verify from the UI
 
-Open `http://127.0.0.1:5173`, choose Live, open the scenario menu, and run Low-3. Baseline and SYNC should appear and advance together. The feeder uses its own application identity and grants the browser viewer access. A publishing/admin token is not needed in the browser. The agent service is still a placeholder and is not involved: these scenarios execute authoritative deterministic database tasks.
+Open `http://127.0.0.1:5173`, choose Live, open the scenario menu, and run Low-3. Baseline and SYNC should appear and advance together. The feeder uses its own application identity and grants the browser viewer access. A publishing/admin token is not needed in the browser. These scenario buttons execute authoritative deterministic database tasks. For real worker processes and cancellation, see [Cart execution](CART_EXECUTION.md).
 
-A CLI equivalent is `pnpm feed --scenario Low-3 --viewer <browser-identity>`; copy the identity from the dashboard's empty-state command. `--ms 0` removes pacing for verification; default pacing is 200 ms per logical tick. Sample mode retains the explicitly labeled sample dataset and completed real scenarios.
+A CLI equivalent is `pnpm feed --scenario Low-3 --viewer <browser-identity>`; copy the identity from the dashboard's empty-state command. `--ms 0` removes pacing for verification; default feeder pacing is 1500 ms per logical tick. Sample mode retains the explicitly labeled sample dataset and completed real scenarios.
 
 Live scenario creation remains a local-dev feature. A production static Vite build has no feeder endpoint or Run buttons; it can read/replay authorized runs. Deploying a production scenario-runner service is separate work.
 

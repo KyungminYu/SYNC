@@ -1,3 +1,8 @@
+import { measurePlanning } from './planningProbe.ts';
+import { REWARD_WEIGHTS } from './reward.ts';
+import { requestCancellation } from './externalExecution.ts';
+import { adaptStaffing, admissionBackpressure } from './staffing.ts';
+import { taskOrders, batchReadyWork } from './cartWorkflow.ts';
 import {
   RollingHorizonEngine,
   planningFingerprint,
@@ -61,6 +66,8 @@ export function emit(
 export function emptyState(run: Run): State {
   return {
     run,
+    taskItems: [],
+    utensils: [],
     planner: [],
     members: [],
     carts: [],
@@ -124,16 +131,29 @@ export function createState(
         ...nextBase(s),
         label: `${role} ${i + 1}`,
         role,
-        capabilities: [role],
-        enabled: true,
+        capabilities:
+          role === 'cashier'
+            ? ['cashier', 'server', 'cup_prep']
+            : role === 'server'
+              ? ['server', 'cashier', 'cleaner', 'cup_prep']
+              : role === 'cleaner'
+                ? ['cleaner', 'cup_prep']
+                : ['barista', 'cup_prep'],
+        enabled: i === 0,
         speedFactor: 1,
         x: Object.keys(ROLE_CAPACITIES).indexOf(role) * 3,
         y: i * 2,
       });
   }
+  for (let i = 0; i < 2; i++)
+    s.utensils.push({ ...nextBase(s), kind: 'pitcher', state: 'clean' });
   for (let i = 0; i < trayCount; i++)
     s.trays.push({ ...nextBase(s), state: 'clean' });
-  emit(s, 'run_created', 'Seven concrete workers; station capacities 2/2/2/1.');
+  emit(
+    s,
+    'run_created',
+    'Four active workers, seven available slots; station capacities 2/2/2/1.',
+  );
   return s;
 }
 export function setMember(
@@ -224,6 +244,11 @@ export function addOrder(
   if (s.run.arrivalsClosed) throw new Error('ARRIVALS_CLOSED');
   // Reuse the open cart for this key, or start a new one at this tick.
   let cart = s.carts.find((c) => c.externalKey === cartKey);
+  if (
+    cart &&
+    s.events.some((e) => e.type === 'cart_submitted' && e.cartId === cart?.id)
+  )
+    throw new Error('CART_SEALED');
   if (cart && cart.status !== 'open') throw new Error('CART_CLOSED');
   if (!cart) {
     cart = {
@@ -234,12 +259,12 @@ export function addOrder(
     } satisfies Cart;
     s.carts.push(cart);
   }
-  const recipe: Recipe = {
+  const recipe: Recipe = s.recipes.find((r) => r.recipe === args.recipe) ?? {
     ...nextBase(s),
     recipe: args.recipe,
     ...RECIPE_INFO[args.recipe],
   };
-  s.recipes.push(recipe);
+  if (!s.recipes.includes(recipe)) s.recipes.push(recipe);
   const o: Order = {
     ...nextBase(s),
     cartId: cart.id,
@@ -260,7 +285,6 @@ export function addOrder(
       ...nextBase(s),
       cartId: o.cartId,
       orderId: o.id,
-      recipeId: o.recipeId,
       kind: d.kind,
       role: d.role,
       status: 'blocked',
@@ -332,13 +356,21 @@ export function blockedReason(s: State, t: Task): string {
       )
   )
     return 'dependencies';
-  const order = s.orders.find((o) => o.id === t.orderId)!;
   if (
     t.customerReleaseGuard &&
-    (order.customerReleaseTick === undefined ||
-      s.run.tick < order.customerReleaseTick)
+    taskOrders(s, t).some(
+      (o) =>
+        o.customerReleaseTick === undefined ||
+        s.run.tick < o.customerReleaseTick,
+    )
   )
     return 'customer_using_tray';
+  if (
+    t.kind === 'prepare_milk' &&
+    s.taskItems.some((x) => x.taskId === t.id) &&
+    !s.utensils.some((u) => u.state === 'clean')
+  )
+    return 'clean_pitcher';
   return 'eligible';
 }
 export function refreshReady(s: State): void {
@@ -380,7 +412,12 @@ export function downstreamTail(
 }
 export function snapshot(s: State): Snapshot {
   refreshReady(s);
-  const tasks = s.tasks.filter((t) => t.status === 'ready');
+  const tasks = s.tasks.filter(
+    (t) =>
+      t.status === 'ready' &&
+      (readPolicy(s).policy !== 'primal_dual' ||
+        !admissionBackpressure(s, t.id)),
+  );
   return {
     tick: s.run.tick,
     budgetRemainingMicrousd:
@@ -439,7 +476,8 @@ function admit(s: State, a: Assignment, policy: string): void {
     !t.requiredCapabilities.every((k) => w.capabilities.includes(k))
   )
     throw new Error('INVALID_ASSIGNMENT');
-  if (blockedReason(s, t) !== 'eligible') throw new Error('NOT_ELIGIBLE');
+  if (blockedReason(s, t) !== 'eligible') return;
+  if (policy === 'primal_dual' && admissionBackpressure(s, t.id)) return;
   const reqs = s.requirements.filter((r) => r.taskId === t.id);
   const totals = new Map<bigint, number>();
   for (const r of reqs)
@@ -463,15 +501,29 @@ function admit(s: State, a: Assignment, policy: string): void {
     if (!tray) throw new Error('TRAY_CONFLICT');
     tray.orderId = order.id;
     tray.state = 'in_use';
-    order.trayId = tray.id;
+    for (const member of taskOrders(s, t)) member.trayId = tray.id;
   }
   if (
     (t.trayMode === 'release' ||
-      t.role === 'cleaner' ||
+      (t.role === 'cleaner' && t.kind !== 'wash_pitcher') ||
       t.kind === 'deliver_order') &&
     order.trayId === undefined
   )
     throw new Error('ORDER_HAS_NO_TRAY');
+  if (t.kind === 'prepare_milk' && s.taskItems.some((x) => x.taskId === t.id)) {
+    const pitcher = s.utensils.find((u) => u.state === 'clean');
+    if (!pitcher) throw new Error('NO_CLEAN_PITCHER');
+    pitcher.state = 'held';
+    pitcher.taskId = t.id;
+  }
+  if (t.kind === 'wash_pitcher') {
+    const pred = s.dependencies.find((d) => d.successorId === t.id)!;
+    const pitcher = s.utensils.find(
+      (u) => u.taskId === pred.predecessorId && u.state === 'dirty',
+    );
+    if (!pitcher) throw new Error('PITCHER_NOT_DIRTY');
+    pitcher.state = 'washing';
+  }
   t.attempt++;
   t.workerId = w.id;
   t.status = 'assigned';
@@ -501,6 +553,15 @@ function admit(s: State, a: Assignment, policy: string): void {
       runId: s.run.id.toString(),
       taskId: t.id.toString(),
       orderId: order.id.toString(),
+      orderIds: taskOrders(s, t).map((o) => o.id.toString()),
+      cartKeys: [
+        ...new Set(
+          taskOrders(s, t).map(
+            (o) => s.carts.find((c) => c.id === o.cartId)!.externalKey,
+          ),
+        ),
+      ],
+      durationTicks: duration(s, t, w.id),
       attempt: t.attempt,
       recipe: recipeOf(s, order).recipe,
       action: t.kind,
@@ -530,9 +591,59 @@ function admit(s: State, a: Assignment, policy: string): void {
 export function schedule(s: State): void {
   if (s.run.status !== 'running') return;
   const config = readPolicy(s);
+  refreshReady(s);
+  if (config.policy === 'primal_dual') {
+    batchReadyWork(s);
+    adaptStaffing(s);
+    if (
+      s.run.mode === 'claude' &&
+      !s.utensils.some((u) => u.state === 'clean') &&
+      s.tasks.some((t) => t.kind === 'wash_pitcher' && t.status === 'ready')
+    ) {
+      for (const job of s.jobs.filter(
+        (j) =>
+          j.status === 'accepted' &&
+          s.tasks.some((t) => t.id === j.taskId && t.kind === 'clean_tray'),
+      )) {
+        const cleaning = s.tasks.find((t) => t.id === job.taskId)!;
+        const waiting = s.tasks.filter(
+          (t) =>
+            t.kind === 'prepare_milk' &&
+            ['blocked', 'ready'].includes(t.status),
+        );
+        const remaining = Math.max(
+          0,
+          (cleaning.finishAtTick ?? s.run.tick + 1) - s.run.tick,
+        );
+        const potential =
+          (waiting.reduce(
+            (n, t) => n + taskOrders(s, t).reduce((v, o) => v + o.value, 0),
+            0,
+          ) *
+            remaining) /
+          (1 + remaining);
+        const penalty =
+          REWARD_WEIGHTS.cancelledAttempt +
+          Number(job.reservedCostMicrousd) / 1000000;
+        if (potential > penalty) {
+          emit(
+            s,
+            'preemption_evaluated',
+            `potential=${potential};penalty=${penalty}`,
+            { taskId: job.taskId, attempt: job.attempt },
+          );
+          requestCancellation(
+            s,
+            { identityHex: s.run.ownerIdentityHex },
+            job.id,
+          );
+        }
+      }
+    }
+  }
   const frontier = snapshot(s);
   if (config.policy === 'primal_dual') {
-    const forecast = new RollingHorizonEngine().plan(s);
+    const forecast = measurePlanning(() => new RollingHorizonEngine().plan(s));
     if (!forecast) return;
     for (const a of forecast.filter((a) => a.startTick === s.run.tick))
       admit(s, a, 'primal_dual');
@@ -543,7 +654,7 @@ export function schedule(s: State): void {
   }
   // Switching away invalidates warm state and forecasts for the prior policy.
   s.planner = [];
-  const proposal = plan(frontier, config);
+  const proposal = measurePlanning(() => plan(frontier, config));
   for (const a of proposal) admit(s, a, config.policy ?? 'sync_greedy');
   s.run.version++;
   assertInvariants(s);
@@ -627,13 +738,28 @@ export function finishTask(s: State, taskId: bigint, attempt: number): void {
     (r) => !(r.taskId === t.id && r.attempt === attempt),
   );
   const job = s.jobs.find((j) => j.taskId === t.id && j.attempt === attempt)!;
+  job.status = 'succeeded';
   s.run.reservedMicrousd -= job.reservedCostMicrousd;
   s.run.modeledSpentMicrousd += job.reservedCostMicrousd;
   const o = s.orders.find((o) => o.id === t.orderId)!;
+  if (t.kind === 'prepare_milk') {
+    const pitcher = s.utensils.find((u) => u.taskId === t.id);
+    if (pitcher) pitcher.state = 'dirty';
+  }
+  if (t.kind === 'wash_pitcher') {
+    const pred = s.dependencies.find((d) => d.successorId === t.id)!;
+    const pitcher = s.utensils.find((u) => u.taskId === pred.predecessorId);
+    if (!pitcher || pitcher.state !== 'washing')
+      throw new Error('PITCHER_OWNERSHIP');
+    pitcher.state = 'clean';
+    pitcher.taskId = undefined;
+  }
   if (t.kind === 'deliver_order') {
-    o.status = 'delivered';
-    o.deliveredTick = s.run.tick;
-    o.customerReleaseTick = s.run.tick + o.customerUseTicks;
+    for (const member of taskOrders(s, t)) {
+      member.status = 'delivered';
+      member.deliveredTick = s.run.tick;
+      member.customerReleaseTick = s.run.tick + member.customerUseTicks;
+    }
   }
   if (t.kind === 'collect_tray')
     s.trays.find((tr) => tr.id === o.trayId)!.state = 'dirty';
@@ -642,9 +768,11 @@ export function finishTask(s: State, taskId: bigint, attempt: number): void {
     if (!tray || tray.orderId !== o.id) throw new Error('TRAY_OWNER_MISMATCH');
     tray.state = 'clean';
     tray.orderId = undefined;
-    o.trayId = undefined;
-    o.status = 'cleaned';
-    o.cleanupCompletedTick = s.run.tick;
+    for (const member of taskOrders(s, t)) {
+      member.trayId = undefined;
+      member.status = 'cleaned';
+      member.cleanupCompletedTick = s.run.tick;
+    }
   }
   emit(s, 'task_succeeded', t.kind, {
     taskId: t.id,
@@ -663,6 +791,7 @@ export function advance(s: State): void {
   for (const t of s.tasks
     .filter(
       (t) =>
+        s.run.mode === 'deterministic' &&
         t.status === 'running' &&
         t.finishAtTick !== undefined &&
         t.finishAtTick <= s.run.tick,
@@ -671,7 +800,11 @@ export function advance(s: State): void {
     finishTask(s, t.id, t.attempt);
   refreshReady(s);
   schedule(s);
-  if (s.run.arrivalsClosed && s.orders.every((o) => o.status === 'cleaned')) {
+  if (
+    s.run.arrivalsClosed &&
+    s.orders.every((o) => o.status === 'cleaned') &&
+    s.tasks.every((t) => t.status === 'succeeded')
+  ) {
     s.run.status = 'completed';
     emit(s, 'run_completed', 'All orders delivered and cleaned.');
   }
@@ -703,7 +836,8 @@ export function setAvailability(
 export function markUncertain(s: State, actor: Principal, jobId: bigint): void {
   requireControl(s, actor);
   const j = s.jobs.find((j) => j.id === jobId);
-  if (!j || j.status !== 'claimed') throw new Error('JOB_NOT_CLAIMED');
+  if (!j || !['claimed', 'accepted', 'cancel_requested'].includes(j.status))
+    throw new Error('JOB_NOT_CLAIMED');
   j.status = 'uncertain';
   s.tasks.find((t) => t.id === j.taskId)!.status = 'uncertain';
   s.run.version++;
@@ -730,6 +864,16 @@ export function reconcile(
   } else {
     // Operator attests that the external action did not occur. Retain order tray.
     j.status = 'failed';
+    const pitcher = s.utensils.find((u) => u.taskId === t.id);
+    if (t.kind === 'prepare_milk' && pitcher) {
+      pitcher.state = 'clean';
+      pitcher.taskId = undefined;
+    }
+    if (t.kind === 'wash_pitcher') {
+      const pred = s.dependencies.find((d) => d.successorId === t.id);
+      const held = s.utensils.find((u) => u.taskId === pred?.predecessorId);
+      if (held) held.state = 'dirty';
+    }
     s.reservations = s.reservations.filter(
       (r) => !(r.taskId === t.id && r.attempt === j.attempt),
     );
@@ -765,33 +909,52 @@ export function assertInvariants(s: State): void {
     s.decisions,
     s.events,
     s.telemetry,
+    s.taskItems,
+    s.utensils,
   ])
     for (const row of group)
       if (row.runId !== s.run.id || row.key !== `${row.runId}:${row.id}`)
         throw new Error('CROSS_RUN_ROW');
-  // Every order sits in a cart and owns exactly one recipe row (1:1).
+  const membership = new Set<string>();
+  for (const item of s.taskItems) {
+    const pair = `${item.taskId}:${item.orderId}`;
+    if (
+      !tasks.has(item.taskId) ||
+      !orders.has(item.orderId) ||
+      membership.has(pair)
+    )
+      throw new Error('INVALID_TASK_MEMBERSHIP');
+    membership.add(pair);
+  }
+  for (const utensil of s.utensils) {
+    if (
+      !['clean', 'held', 'dirty', 'washing'].includes(utensil.state) ||
+      (utensil.state === 'clean') !== (utensil.taskId === undefined) ||
+      (utensil.taskId !== undefined && !tasks.has(utensil.taskId))
+    )
+      throw new Error('UTENSIL_OWNERSHIP');
+  }
+  // Every order references a reusable recipe definition and exactly one cart.
   const recipeOwners = new Set<bigint>();
   for (const o of s.orders) {
     if (!s.carts.some((c) => c.id === o.cartId)) throw new Error('ORDER_CART');
-    if (
-      !s.recipes.some((r) => r.id === o.recipeId) ||
-      recipeOwners.has(o.recipeId)
-    )
+    if (!s.recipes.some((r) => r.id === o.recipeId))
       throw new Error('ORDER_RECIPE');
     recipeOwners.add(o.recipeId);
   }
   if (recipeOwners.size !== s.recipes.length) throw new Error('ORPHAN_RECIPE');
   for (const t of s.tasks) {
     const o = orders.get(t.orderId);
-    if (o && (o.cartId !== t.cartId || o.recipeId !== t.recipeId))
-      throw new Error('TASK_ORDER_LINK');
+    if (o && o.cartId !== t.cartId) throw new Error('TASK_ORDER_LINK');
   }
   for (const d of s.dependencies) {
     if (
       !tasks.has(d.predecessorId) ||
       !tasks.has(d.successorId) ||
-      tasks.get(d.predecessorId)!.orderId !== d.orderId ||
-      tasks.get(d.successorId)!.orderId !== d.orderId
+      !taskOrders(s, tasks.get(d.predecessorId)!).some(
+        (o) => o.id === d.orderId,
+      ) ||
+      !taskOrders(s, tasks.get(d.successorId)!).some((o) => o.id === d.orderId)
     )
       throw new Error('INVALID_EDGE');
   }
@@ -861,7 +1024,10 @@ export function assertInvariants(s: State): void {
   for (const o of s.orders)
     if (
       o.trayId !== undefined &&
-      !s.trays.some((tr) => tr.id === o.trayId && tr.orderId === o.id)
+      !s.trays.some(
+        (tr) =>
+          tr.id === o.trayId && orders.get(tr.orderId!)?.cartId === o.cartId,
+      )
     )
       throw new Error('ORDER_TRAY_MISMATCH');
   if (
@@ -884,7 +1050,8 @@ export function closeArrivals(s: State, actor: Principal): void {
   emit(s, 'arrivals_closed', 'No more orders will be admitted.');
   if (
     s.run.status === 'running' &&
-    s.orders.every((o) => o.status === 'cleaned')
+    s.orders.every((o) => o.status === 'cleaned') &&
+    s.tasks.every((t) => t.status === 'succeeded')
   ) {
     s.run.status = 'completed';
     emit(s, 'run_completed', 'All admitted orders delivered and cleaned.');

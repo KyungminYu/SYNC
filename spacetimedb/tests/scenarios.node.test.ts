@@ -1,3 +1,4 @@
+import { addCart } from '../src/domain/cartWorkflow.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { simulate } from '../../apps/web/src/sync/mock/scenario.ts';
@@ -9,7 +10,6 @@ import { menuByName, cartKeyFor } from '../../apps/web/src/sync/menu.ts';
 import {
   createState,
   setPolicy,
-  addOrder,
   advance,
   closeArrivals,
   assertInvariants,
@@ -41,16 +41,17 @@ for (const scenario of SCENARIOS)
       const last = Math.max(...arrivals.map((c) => c.tick));
       for (let tick = 0; tick < 3000 && s.run.status !== 'completed'; tick++) {
         for (const c of arrivals.filter((c) => c.tick === tick))
-          for (const [k, item] of c.items.entries())
-            addOrder(s, owner, {
-              externalKey: `${c.id}-${k}`,
-              cartKey: cartKeyFor(c.id, c.items),
+          addCart(s, owner, {
+            cartKey: cartKeyFor(c.id, c.items),
+            items: c.items.map((item) => ({
               recipe: menuByName(item.name)!.recipe,
-              deadlineInTicks: 86,
-              value: 1,
-              priority: 0,
-              customerUseTicks: 0,
-            });
+              quantity: 1,
+            })),
+            deadlineInTicks: 86,
+            value: 1,
+            priority: 0,
+            customerUseTicks: 0,
+          });
         if (tick === last) closeArrivals(s, owner);
         advance(s);
       }

@@ -10,6 +10,12 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const CartItemInput = __t.object("CartItemInput", {
+  recipe: __t.string(),
+  quantity: __t.u32(),
+});
+export type CartItemInput = __Infer<typeof CartItemInput>;
+
 export const ServiceJobPayload = __t.object("ServiceJobPayload", {
   key: __t.string(),
   id: __t.u64(),
@@ -26,6 +32,22 @@ export type ServiceJobPayload = __Infer<typeof ServiceJobPayload>;
 
 export const ServiceJobs = __t.object("ServiceJobs", {});
 export type ServiceJobs = __Infer<typeof ServiceJobs>;
+
+export const ServiceWorkerPayload = __t.object("ServiceWorkerPayload", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  label: __t.string(),
+  role: __t.string(),
+  enabled: __t.bool(),
+  runStatus: __t.string(),
+  mode: __t.string(),
+  currentTaskId: __t.option(__t.u64()),
+});
+export type ServiceWorkerPayload = __Infer<typeof ServiceWorkerPayload>;
+
+export const ServiceWorkers = __t.object("ServiceWorkers", {});
+export type ServiceWorkers = __Infer<typeof ServiceWorkers>;
 
 export const SyncCarts = __t.object("SyncCarts", {
   key: __t.string(),
@@ -214,13 +236,21 @@ export const SyncRun = __t.object("SyncRun", {
 });
 export type SyncRun = __Infer<typeof SyncRun>;
 
+export const SyncTaskItems = __t.object("SyncTaskItems", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  taskId: __t.u64(),
+  orderId: __t.u64(),
+});
+export type SyncTaskItems = __Infer<typeof SyncTaskItems>;
+
 export const SyncTasks = __t.object("SyncTasks", {
   key: __t.string(),
   id: __t.u64(),
   runId: __t.u64(),
   cartId: __t.u64(),
   orderId: __t.u64(),
-  recipeId: __t.u64(),
   kind: __t.string(),
   role: __t.string(),
   status: __t.string(),
@@ -266,6 +296,16 @@ export const SyncTrays = __t.object("SyncTrays", {
   orderId: __t.option(__t.u64()),
 });
 export type SyncTrays = __Infer<typeof SyncTrays>;
+
+export const SyncUtensils = __t.object("SyncUtensils", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  kind: __t.string(),
+  state: __t.string(),
+  taskId: __t.option(__t.u64()),
+});
+export type SyncUtensils = __Infer<typeof SyncUtensils>;
 
 export const SyncWorkers = __t.object("SyncWorkers", {
   key: __t.string(),
@@ -354,6 +394,10 @@ export const UiMetricsPayload = __t.object("UiMetricsPayload", {
   readyTasks: __t.u32(),
   busyWorkers: __t.u32(),
   totalWorkers: __t.u32(),
+  activeWorkers: __t.u32(),
+  reward: __t.f64(),
+  penalty: __t.f64(),
+  netReward: __t.f64(),
   dirtyOrInUseTrays: __t.u32(),
   modeledSpentMicrousd: __t.u64(),
   reservedMicrousd: __t.u64(),
@@ -372,7 +416,7 @@ export const UiOrderPayload = __t.object("UiOrderPayload", {
   id: __t.u64(),
   runId: __t.u64(),
   cartKey: __t.string(),
-  recipe: __t.string(),
+  recipeKey: __t.string(),
   status: __t.string(),
   arrivalTick: __t.u32(),
   deadlineTick: __t.u32(),
@@ -462,6 +506,7 @@ export const UiTaskPayload = __t.object("UiTaskPayload", {
   id: __t.u64(),
   runId: __t.u64(),
   orderId: __t.u64(),
+  orderIds: __t.array(__t.u64()),
   kind: __t.string(),
   role: __t.string(),
   status: __t.string(),
@@ -470,6 +515,7 @@ export const UiTaskPayload = __t.object("UiTaskPayload", {
   releaseTick: __t.u32(),
   deadlineTick: __t.option(__t.u32()),
   durationTicks: __t.u32(),
+  estimatedCostMicrousd: __t.u64(),
   attempt: __t.u32(),
   workerId: __t.option(__t.u64()),
   startedTick: __t.option(__t.u32()),

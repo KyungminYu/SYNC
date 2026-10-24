@@ -77,7 +77,10 @@ if (existsSync(PID_FILE)) {
 writeFileSync(PID_FILE, String(process.pid));
 process.on('exit', () => {
   // Leave the file to a newer feeder that took over.
-  if (existsSync(PID_FILE) && Number(readFileSync(PID_FILE, 'utf8')) === process.pid)
+  if (
+    existsSync(PID_FILE) &&
+    Number(readFileSync(PID_FILE, 'utf8')) === process.pid
+  )
     rmSync(PID_FILE, { force: true });
 });
 for (const signal of ['SIGTERM', 'SIGINT'] as const)
@@ -104,12 +107,11 @@ if (newViewer) {
 /** Connects with the stored feeder identity and subscribes to the runs view. */
 function connect() {
   return new Promise<DbConnection>((resolve, reject) => {
-    let connection: DbConnection | undefined;
     const timer = setTimeout(() => {
       connection?.disconnect();
       reject(new Error('Database connection timed out'));
     }, 10000);
-    connection = DbConnection.builder()
+    const connection = DbConnection.builder()
       .withUri(uri)
       .withDatabaseName(database)
       .withToken(
@@ -143,7 +145,7 @@ function connect() {
 
 /** Runs one owner may have (engine `create_run` limit). */
 const OWNER_RUN_LIMIT = 10;
-async function main() {
+async function main(scenario: NonNullable<ReturnType<typeof scenarioById>>) {
   let conn = await connect();
   if (
     ![...conn.db.uiPolicyCatalog.iter()].some((p) => p.name === 'primal_dual')
@@ -204,7 +206,7 @@ async function main() {
     conn.disconnect();
   }
 }
-main().catch(() => {
+main(scenario).catch(() => {
   console.error(
     'Scenario failed: cannot connect or subscribe to the configured database. Check the server URL and publish the current module (ui_runs and ui_policy_catalog are required).',
   );

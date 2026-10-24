@@ -1,17 +1,17 @@
 # Online primal-dual scheduling in SYNC
 
-Select the backend policy with `set_policy({ runId, configJson: '{"policy":"primal_dual"}' })` (generated TypeScript: `connection.reducers.setPolicy`). The six existing policies remain available for comparisons. The default remains `sync_greedy`; the dashboard and its source adapter are unchanged.
+Select the backend policy with `set_policy({ runId, configJson: '{"policy":"primal_dual"}' })` (generated TypeScript: `connection.reducers.setPolicy`). The six existing policies remain available for comparisons. The default remains `sync_greedy`; the dashboard consumes cart-aware task membership and execution views. See [Cart execution](CART_EXECUTION.md) for external workers and the current full-DAG extension.
 
 ## Packing model
 
-At each planning event, an alternative is a ready task, compatible worker, and integer start tick. Binary choices select at most one alternative per task. Each choice consumes multiple dimensions simultaneously:
+At each planning event, an alternative is an unfinished task in the revealed DAG, a compatible worker, and an integer start tick. Feasible repair checks forecast predecessor finishes before successors. Binary choices select at most one alternative per task. Each choice consumes multiple dimensions simultaneously:
 
 - Worker occupancy in each covered tick.
 - Every required resource's units in each covered tick, including duplicate requirements aggregated together.
 - A clean tray permit, held conservatively for the entire horizon. A predicted return does not supply a new permit.
 - Modeled cost against the remaining cumulative budget. Completion transfers reserved cost to spent cost; it does not replenish budget.
 
-For choice c, utility is `(1 + value + priority + 0.05 * cappedAge + 0.1 * cappedLateness) / (1 + 0.05 * startDelay)`. Age is capped at 300 and lateness at 30 ticks. This rewards urgent ready work and discourages delay; it is a task-level objective, not realized order revenue.
+For choice c, utility is `(1 + downstreamOrderValue + priority + 0.05 * cappedAge + 0.1 * cappedLateness + recyclingUrgency - boundedCostPenalty) / (1 + 0.05 * startDelay)`. Age is capped at 300 and lateness at 30 ticks. This rewards urgent ready work and discourages delay; it is a task-level objective, not realized order revenue.
 
 The packing objective is maximize `sum utility[c] * x[c]`, subject to one choice per task and `sum demand[c,k] * x[c] <= residualCapacity[k]` for every dimension k.
 
@@ -25,7 +25,7 @@ The relaxed primal chooses one positive reduced-utility alternative per task. Re
 
 `domain/rollingHorizonEngine.ts` uses a 24-tick horizon, 16 dual iterations, at most 4,096 alternatives, and an 8-tick safety refresh. Start-time-first enumeration prioritizes immediate alternatives under the cap. These fixed settings are exported as `ROLLING_CONFIG`; the older policy weight fields do not tune this policy.
 
-Only the currently ready frontier is forecast. Dependencies, release guards, and customer-use waits are resolved by the authoritative engine before a task enters that frontier. This implementation does not forecast the full unready DAG. A task longer than the horizon occupies every remaining horizon slot and retains its true finish estimate.
+The full revealed DAG is forecast, including blocked successors and customer-use guards. Future tasks require selected or running predecessors to finish first. Actual admission remains ready-only; no predicted finish releases a real claim. Clean pitchers and trays are conservatively bounded without assuming future recycling. A task longer than the horizon occupies the remaining slots and retains its true finish estimate.
 
 Running work supplies predicted capacity only at its expected finish; unconfirmed, uncertain, and overdue work holds capacity across the horizon. Predictions never remove actual reservations. Only choices whose start equals the current tick pass through the existing transactional admission checks. Future choices are replanned, never blindly dispatched from stored JSON.
 

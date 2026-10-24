@@ -65,7 +65,6 @@ export const orders = table(
     runId: t.u64().index('btree'),
     cartId: t.u64().index('btree'),
     externalKey: t.string(),
-    // Run-local id, so 1:1 is enforced by the engine, not a global unique index.
     recipeId: t.u64(),
     arrivalTick: t.u32(),
     deadlineTick: t.u32(),
@@ -87,7 +86,6 @@ export const tasks = table(
     runId: t.u64().index('btree'),
     cartId: t.u64().index('btree'),
     orderId: t.u64().index('btree'),
-    recipeId: t.u64(),
     kind: t.string(),
     role: t.string(),
     status: t.string(),
@@ -278,7 +276,30 @@ export const planner = table(
     planJson: t.string(),
   },
 );
+export const taskItems = table(
+  { name: 'sync_task_items', public: false },
+  {
+    key: t.string().primaryKey(),
+    id: t.u64(),
+    runId: t.u64().index('btree'),
+    taskId: t.u64().index('btree'),
+    orderId: t.u64().index('btree'),
+  },
+);
+export const utensils = table(
+  { name: 'sync_utensils', public: false },
+  {
+    key: t.string().primaryKey(),
+    id: t.u64(),
+    runId: t.u64().index('btree'),
+    kind: t.string(),
+    state: t.string(),
+    taskId: t.option(t.u64()),
+  },
+);
 export const db = schema({
+  taskItems,
+  utensils,
   planner,
   run,
   members,
