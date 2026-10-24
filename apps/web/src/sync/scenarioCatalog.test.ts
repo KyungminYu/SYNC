@@ -27,6 +27,6 @@ it('-2 adds drinks only', () => {
   expect(applyScenario(scenarioById('High-2')!, base).map((c) => c.arrival)).toEqual([0, 10, 20]);
 });
 
-it('-3 makes groups arrive together', () => {
-  expect(applyScenario(scenarioById('Low-3')!, base).map((c) => c.arrival)).toEqual([0, 0, 20]);
+it('-3 makes customers come back to back, never at the same moment', () => {
+  expect(applyScenario(scenarioById('Low-3')!, base).map((c) => c.arrival)).toEqual([0, 2, 20]);
 });

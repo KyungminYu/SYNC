@@ -130,8 +130,9 @@ Menu (same as the SYNC engine recipes; more drinks may be added later):
 1. One make task per drink (parallel bars) or one per order? This doc assumes per drink.
 2. May the cleaner help other roles, and may others clean?
 3. Complexity coefficients, item counts per order, arrival pattern and deadline rule.
-   (The mock's sample arrivals: in the `morning` scenario the first half of customers
-   arrive every `rushGap` seconds, default 14, the rest every 17 s, plus 0–4 s noise.)
+   (The mock's sample arrivals: 24 customers; in the `morning` scenario the first half
+   arrive every `rushGap` seconds, default 14, the rest every 17 s, plus 0–4 s noise.
+   `ARRIVAL_RATE` in the mock scales both the count and the pace.)
 4. Helping slowdown factor per role pair.
 5. Weights β, γ, δ and whether `planningMs` is used as C_coord.
 
