@@ -16,9 +16,9 @@ import './dashboard.css';
  * scenario dropdown); the URL carries no options. The dashboard only reads
  * the database; scenarios are written by scripts/feed-scenario.ts, which the
  * dev server can start for the dashboard through the ScenarioRunner port.
- *   Live   — subscribes to SpacetimeDB and shows the picked scenario
+ *   Live   — (default) subscribes to SpacetimeDB and shows the picked scenario
  *            (Low-1, Mid-2, …) as it changes.
- *   Sample — the mock scenario (default) or a finished live result saved in
+ *   Sample — the mock scenario or a finished live result saved in
  *            the database, replayed from the start.
  * The database comes from VITE_SPACETIMEDB_* (apps/web/.env.local).
  */
@@ -42,7 +42,7 @@ function sourceFor(mode: DashboardMode): SyncSource {
 }
 
 function App() {
-  const [mode, setMode] = useState<DashboardMode>('sample');
+  const [mode, setMode] = useState<DashboardMode>('live');
   const source = useMemo(() => sourceFor(mode), [mode]);
   return (
     <Dashboard
