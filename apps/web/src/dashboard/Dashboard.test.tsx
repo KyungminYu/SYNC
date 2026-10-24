@@ -9,7 +9,8 @@ import {
   screen,
 } from '@testing-library/react';
 import { MockSyncSource } from '../sync/mock/MockSyncSource';
-import { SpacetimeSyncSource } from '../sync/live/SpacetimeSyncSource';
+import type { RunData } from '../sync/contract';
+import type { SyncSnapshot, SyncSource } from '../sync/source';
 import { Dashboard } from './Dashboard';
 
 /** Dashboard through the port with a real mock source; Phaser is stubbed (no canvas in jsdom). */
@@ -51,8 +52,51 @@ it('renders the mock runs through the port: floors, scorecard, decisions, sample
   expect(detail).toMatch(/done \d/);
 });
 
-it('shows the live adapter as disconnected instead of inventing data', () => {
-  render(<Dashboard source={new SpacetimeSyncSource()} />);
-  expect(screen.getByRole('alert').textContent).toMatch(/not implemented/);
-  expect(screen.queryByRole('note')).toBeNull();
+/** A read-only live source with a fixed snapshot (no network in tests). */
+function fakeLive(snapshot: SyncSnapshot): SyncSource {
+  return {
+    origin: 'live',
+    label: 'SpacetimeDB',
+    delivery: 'stream',
+    clockNote: 'Clock owned by feeder',
+    connect() {},
+    disconnect() {},
+    getSnapshot: () => snapshot,
+    subscribe: () => () => {},
+  };
+}
+
+it('live without visible runs shows who to grant and the feeder command', () => {
+  render(
+    <Dashboard
+      source={fakeLive({
+        status: { kind: 'ready' },
+        runs: {},
+        emptyHint: { message: 'Connected as abc…', command: 'pnpm feed --viewer abc' },
+      })}
+    />,
+  );
+  expect(screen.getByText('SpacetimeDB')).toBeTruthy();
+  expect(screen.getByText('pnpm feed --viewer abc')).toBeTruthy();
+  // Never the sample banner on live data.
+  expect(screen.queryByText(/placeholders from the mock backend/)).toBeNull();
+});
+
+it('live runs hide playback controls and the seed comparison', async () => {
+  const mock = new MockSyncSource({ seed: 5, delivery: 'replay', latencyMs: 0 });
+  mock.connect();
+  await vi.waitFor(() => expect(mock.getSnapshot().status.kind).toBe('ready'));
+  // A live run that is still running: time comes from the database.
+  const running = (r?: RunData) => r && { ...r, run: { ...r.run, status: 'running' as const } };
+  const { baseline, sync } = mock.getSnapshot().runs;
+  const runs = { baseline: running(baseline), sync: running(sync) };
+  render(
+    <Dashboard
+      source={fakeLive({ status: { kind: 'ready' }, runs, note: 'Driven by the feeder · tick 12' })}
+    />,
+  );
+  expect(screen.getByText('Driven by the feeder · tick 12')).toBeTruthy();
+  expect(screen.getByText(/Clock owned by feeder/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /Step forward/ })).toBeNull();
+  expect(screen.queryByText(/Seed comparison pending/)).toBeNull();
 });

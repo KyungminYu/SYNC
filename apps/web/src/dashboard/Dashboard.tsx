@@ -1,31 +1,73 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Decision, Policy } from '../sync/contract';
+import type { ScenarioRunner } from '../sync/runner';
 import type { SyncSource } from '../sync/source';
 import { DecisionsPanel } from './components/DecisionsPanel';
+import { ScenarioPicker } from './components/ScenarioPicker';
 import { Scorecard } from './components/Scorecard';
 import { ShopCard } from './components/ShopCard';
 import { Timeline, type Marker } from './components/Timeline';
-import { SampleBanner, TopBar } from './components/TopBar';
+import {
+  LiveBanner,
+  SampleBanner,
+  TopBar,
+  type DashboardMode,
+} from './components/TopBar';
 import type { DecisionFilter } from './model/decisions';
 import { buildLanes } from './model/lanes';
 import { scoreAt } from './model/scoreAt';
-import { peakWaiting, sceneAt } from './model/scene';
+import { peakLine, peakWaiting, sceneAt } from './model/scene';
 import { usePlayback } from './usePlayback';
 import { useSyncSnapshot } from './useSyncSnapshot';
 
 /** The one-screen dashboard. Knows only the SyncSource port, never an adapter. */
-export function Dashboard({ source }: { source: SyncSource }) {
-  const { status, runs, benchmark, issues } = useSyncSnapshot(source);
+export function Dashboard({
+  source,
+  runner,
+  mode,
+  onMode,
+}: {
+  source: SyncSource;
+  /** Starts new scenarios (Live mode on the dev server); absent = no start buttons. */
+  runner?: ScenarioRunner;
+  /** Live / Sample toggle; the composition root swaps the source. */
+  mode?: DashboardMode;
+  onMode?(mode: DashboardMode): void;
+}) {
+  const {
+    status,
+    runs,
+    benchmark,
+    issues,
+    note,
+    emptyHint,
+    scenarios,
+    scenarioId,
+    viewer,
+  } = useSyncSnapshot(source);
   const { baseline, sync } = runs;
   const end = Math.max(baseline?.run.simTime ?? 0, sync?.run.simTime ?? 0);
   // Live = stream delivery that is still running; the playhead then follows it.
   const live =
     source.delivery === 'stream' &&
     [baseline, sync].some((r) => r?.run.status === 'running');
+  // Time moves outside playback (the database) while a live run is running;
+  // a finished scenario can be replayed with the normal controls.
+  const externalClock = !!source.clockNote && live;
   const playback = usePlayback(end, live ? end : undefined);
   const [policy, setPolicy] = useState<Policy>('sync');
   const [filter, setFilter] = useState<DecisionFilter>('all');
   const [selected, setSelected] = useState<Decision>();
+
+  // Another scenario: forget the selected decision. A replay starts from 0;
+  // in Live a finished scenario opens on its final tick, and a running one
+  // keeps following the newest tick (seeking would stop following).
+  useEffect(() => {
+    setSelected(undefined);
+    if (source.delivery === 'replay') playback.seek(0);
+    else if (!live) playback.seek(end);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on scenario change
+  }, [scenarioId]);
 
   const t = playback.t;
   // Both floors share one lane network sized for the busier run, so the two
@@ -38,7 +80,12 @@ export function Dashboard({ source }: { source: SyncSource }) {
       sync ? peakWaiting(sync) : 0,
       10,
     );
-    return buildLanes(layout, capacity);
+    // Long lines add queue rows in pairs (same rule for both cards).
+    const line = Math.max(
+      baseline ? peakLine(baseline) : 0,
+      sync ? peakLine(sync) : 0,
+    );
+    return buildLanes(layout, capacity, line);
   }, [baseline, sync]);
   // Both floors are drawn at the same time t.
   const scenes = {
@@ -74,11 +121,61 @@ export function Dashboard({ source }: { source: SyncSource }) {
 
   return (
     <div className="dashboard">
-      <TopBar run={runLabel} origin={source.origin} status={status} />
-      {source.origin === 'sample' && <SampleBanner />}
+      <TopBar
+        run={
+          scenarios?.length || runner ? (
+            <ScenarioPicker
+              options={
+                runner
+                  ? // Every fixed scenario, with its state in the database
+                    // (never run = listed but not viewable yet).
+                    runner.scenarios.map((r) => {
+                      const db = scenarios?.find((s) => s.id === r.id);
+                      return { ...r, meta: db?.meta ?? 'not run', disabled: !db };
+                    })
+                  : (scenarios ?? [])
+              }
+              value={scenarioId}
+              showMeta={source.origin === 'live' && source.delivery === 'stream'}
+              onSelect={(id) => source.selectScenario?.(id)}
+              onRun={
+                runner &&
+                (async (id) => {
+                  if (!viewer) throw new Error('Not connected to the database yet.');
+                  // The source follows the scenario once its new runs appear.
+                  await runner.start(id, viewer);
+                })
+              }
+              footnote={
+                runner
+                  ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); each scenario changes one lever.'
+                  : undefined
+              }
+            />
+          ) : (
+            runLabel
+          )
+        }
+        origin={source.origin}
+        status={status}
+        label={source.label}
+        clock={externalClock ? source.clockNote : undefined}
+        mode={mode}
+        onMode={onMode}
+      />
+      {source.origin === 'sample' && <SampleBanner note={note} />}
+      {source.origin === 'live' && note && (
+        // Engine data: LIVE while something drives it, SAVED when replaying a finished pair.
+        <LiveBanner note={note} tag={externalClock ? 'LIVE' : 'SAVED'} />
+      )}
       {status.kind === 'disconnected' && (
         <div className="state-banner critical" role="alert">
           {status.reason}
+          {status.action && (
+            <button className="primary" onClick={status.action.run}>
+              {status.action.label}
+            </button>
+          )}
           <button onClick={() => source.connect()}>Retry</button>
         </div>
       )}
@@ -99,7 +196,16 @@ export function Dashboard({ source }: { source: SyncSource }) {
           Connecting to SYNC…
         </main>
       ) : !baseline && !sync ? (
-        <main className="state-empty">No runs yet.</main>
+        <main className="state-empty">
+          {emptyHint ? (
+            <div className="empty-hint">
+              <p>{emptyHint.message}</p>
+              {emptyHint.command && <code>{emptyHint.command}</code>}
+            </div>
+          ) : (
+            'No runs yet.'
+          )}
+        </main>
       ) : (
         <main className="body">
           <div className="left">
@@ -119,6 +225,7 @@ export function Dashboard({ source }: { source: SyncSource }) {
               sync={sync && scoreAt(sync, t)}
               baseline={baseline && scoreAt(baseline, t)}
               benchmark={benchmark}
+              seedLine={source.origin === 'sample'}
             />
           </div>
           <DecisionsPanel
@@ -149,6 +256,7 @@ export function Dashboard({ source }: { source: SyncSource }) {
         T={sync?.run.objective.T ?? baseline?.run.objective.T ?? 0}
         playing={live ? playback.following : playback.playing}
         live={live}
+        controls={!externalClock}
         speed={playback.speed}
         markers={markers}
         onToggle={playback.toggle}

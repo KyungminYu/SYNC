@@ -78,6 +78,110 @@ input:focus-visible {
   font-size: 13px;
   margin-right: auto;
 }
+/* Scenario dropdown (Figma "Scenario dropdown (open)"). */
+.scenario-picker {
+  position: relative;
+}
+.picker-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.picker-button .chevron {
+  color: var(--text-secondary);
+}
+.picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: 300px;
+  padding: 6px 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+}
+.picker-group {
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.picker-menu {
+  width: 380px;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+}
+.picker-row[aria-selected='true'],
+.picker-row:hover {
+  background: var(--bg-selected);
+}
+.picker-row .pick {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 6px 12px;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+}
+.picker-row .pick:disabled {
+  cursor: default;
+}
+.picker-text {
+  display: grid;
+  gap: 1px;
+}
+.picker-detail {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.picker-row .run {
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-selected);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.picker-foot {
+  margin: 6px 12px 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.picker-foot.error {
+  color: var(--status-critical);
+}
+.picker-menu .check {
+  width: 12px;
+}
+.picker-menu .label {
+  font-weight: 500;
+}
+.picker-menu .meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
 .source-badge {
   display: inline-flex;
   align-items: center;
@@ -86,6 +190,18 @@ input:focus-visible {
   padding: 3px 10px;
   border-radius: 999px;
   border: 1px solid var(--border-strong);
+}
+/* Live / Sample toggle in the top bar (Figma "Mode toggle (Live | Sample)"). */
+.mode-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+.mode-toggle button {
+  border-radius: 6px;
+  padding: 3px 12px;
 }
 .source-badge .segmented {
   display: inline-flex;
@@ -160,6 +276,63 @@ input:focus-visible {
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   padding: 3px 10px;
+}
+/* Only the first button is pushed right; the rest sit beside it. */
+.state-banner button + button {
+  margin-left: 0;
+}
+/* The suggested fix (Figma "Run limit reached": filled button). */
+.state-banner button.primary {
+  background: var(--text-primary);
+  color: var(--bg-raised);
+  border-color: var(--text-primary);
+}
+/* Live data (Figma "SYNC Dashboard · Live"): green banner and clock pill. */
+.live-banner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 20px;
+  font-size: 12px;
+  color: #17592f;
+  background: #e6f7eb;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.live-banner .tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+.clock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: #17732f;
+  background: #e6f7eb;
+}
+.clock-pill .dot {
+  background: #17732f;
+}
+/* Empty live state: who this dashboard is and how to get runs shared with it. */
+.empty-hint {
+  max-width: 560px;
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+.empty-hint code {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  word-break: break-all;
 }
 .state-empty {
   display: grid;
@@ -663,6 +836,10 @@ input:focus-visible {
   padding: 10px 20px;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-surface);
+}
+/* `hidden` must win over the flex display (Live mode has no playback controls). */
+.timeline .controls[hidden] {
+  display: none;
 }
 .timeline .controls {
   display: flex;

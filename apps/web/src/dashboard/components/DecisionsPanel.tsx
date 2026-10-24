@@ -76,7 +76,9 @@ export function DecisionsPanel(p: Props) {
       </header>
 
       <div className="filters" role="group" aria-label="Filter decisions">
-        {(Object.keys(filterLabels) as DecisionFilter[]).map((f) => (
+        {(Object.keys(filterLabels) as DecisionFilter[])
+          .filter((f) => f === 'all' || counts[f] > 0 || p.filter === f)
+          .map((f) => (
           <button
             key={f}
             className={`filter-${f}`}
