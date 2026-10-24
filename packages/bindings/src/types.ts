@@ -27,6 +27,16 @@ export type ServiceJobPayload = __Infer<typeof ServiceJobPayload>;
 export const ServiceJobs = __t.object("ServiceJobs", {});
 export type ServiceJobs = __Infer<typeof ServiceJobs>;
 
+export const SyncCarts = __t.object("SyncCarts", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  externalKey: __t.string(),
+  arrivalTick: __t.u32(),
+  status: __t.string(),
+});
+export type SyncCarts = __Infer<typeof SyncCarts>;
+
 export const SyncClock = __t.object("SyncClock", {
   scheduledId: __t.u64(),
   scheduledAt: __t.scheduleAt(),
@@ -68,6 +78,7 @@ export const SyncEvents = __t.object("SyncEvents", {
   tick: __t.u32(),
   type: __t.string(),
   taskId: __t.option(__t.u64()),
+  cartId: __t.option(__t.u64()),
   orderId: __t.option(__t.u64()),
   workerId: __t.option(__t.u64()),
   attempt: __t.option(__t.u32()),
@@ -106,8 +117,9 @@ export const SyncOrders = __t.object("SyncOrders", {
   key: __t.string(),
   id: __t.u64(),
   runId: __t.u64(),
+  cartId: __t.u64(),
   externalKey: __t.string(),
-  recipe: __t.string(),
+  recipeId: __t.u64(),
   arrivalTick: __t.u32(),
   deadlineTick: __t.u32(),
   value: __t.u32(),
@@ -120,6 +132,16 @@ export const SyncOrders = __t.object("SyncOrders", {
   trayId: __t.option(__t.u64()),
 });
 export type SyncOrders = __Infer<typeof SyncOrders>;
+
+export const SyncRecipes = __t.object("SyncRecipes", {
+  key: __t.string(),
+  id: __t.u64(),
+  runId: __t.u64(),
+  recipe: __t.string(),
+  name: __t.string(),
+  description: __t.string(),
+});
+export type SyncRecipes = __Infer<typeof SyncRecipes>;
 
 export const SyncRequirements = __t.object("SyncRequirements", {
   key: __t.string(),
@@ -178,7 +200,9 @@ export const SyncTasks = __t.object("SyncTasks", {
   key: __t.string(),
   id: __t.u64(),
   runId: __t.u64(),
+  cartId: __t.u64(),
   orderId: __t.u64(),
+  recipeId: __t.u64(),
   kind: __t.string(),
   role: __t.string(),
   status: __t.string(),
@@ -329,6 +353,7 @@ export const UiOrderPayload = __t.object("UiOrderPayload", {
   key: __t.string(),
   id: __t.u64(),
   runId: __t.u64(),
+  cartKey: __t.string(),
   recipe: __t.string(),
   status: __t.string(),
   arrivalTick: __t.u32(),

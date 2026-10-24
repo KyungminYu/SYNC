@@ -8,12 +8,20 @@ import type {
   Snapshot,
   Assignment,
 } from '../policies/scheduler.ts';
-import { materializeRecipe, ROLE_CAPACITIES, isRecipeId } from './recipes.ts';
+import {
+  materializeRecipe,
+  ROLE_CAPACITIES,
+  isRecipeId,
+  RECIPE_INFO,
+} from './recipes.ts';
 import type { RecipeId } from './recipes.ts';
 import type {
   State,
   Principal,
+  Cart,
+  CartStatus,
   Order,
+  Recipe,
   Task,
   Run,
   Event,
@@ -50,6 +58,8 @@ export function emptyState(run: Run): State {
   return {
     run,
     members: [],
+    carts: [],
+    recipes: [],
     orders: [],
     tasks: [],
     dependencies: [],
@@ -165,6 +175,8 @@ export function addOrder(
   actor: Principal,
   args: {
     externalKey: string;
+    // Orders sharing a cartKey belong to one customer cart; omitted = one-item cart.
+    cartKey?: string;
     recipe: RecipeId;
     deadlineInTicks: number;
     value: number;
@@ -175,10 +187,13 @@ export function addOrder(
   requireControl(s, actor);
   if (!args.externalKey || args.externalKey.length > 100)
     throw new Error('INVALID_EXTERNAL_KEY');
+  const cartKey = args.cartKey ?? args.externalKey;
+  if (!cartKey || cartKey.length > 100) throw new Error('INVALID_CART_KEY');
   const old = s.orders.find((o) => o.externalKey === args.externalKey);
   if (old) {
     if (
-      old.recipe !== args.recipe ||
+      recipeOf(s, old).recipe !== args.recipe ||
+      s.carts.find((c) => c.id === old.cartId)?.externalKey !== cartKey ||
       old.deadlineTick - old.arrivalTick !== args.deadlineInTicks ||
       old.value !== args.value ||
       old.priority !== args.priority ||
@@ -202,10 +217,29 @@ export function addOrder(
   if (s.run.status === 'completed')
     throw new Error('RUN_COMPLETED_CREATE_NEW_RUN');
   if (s.run.arrivalsClosed) throw new Error('ARRIVALS_CLOSED');
+  // Reuse the open cart for this key, or start a new one at this tick.
+  let cart = s.carts.find((c) => c.externalKey === cartKey);
+  if (cart && cart.status !== 'open') throw new Error('CART_CLOSED');
+  if (!cart) {
+    cart = {
+      ...nextBase(s),
+      externalKey: cartKey,
+      arrivalTick: s.run.tick,
+      status: 'open',
+    } satisfies Cart;
+    s.carts.push(cart);
+  }
+  const recipe: Recipe = {
+    ...nextBase(s),
+    recipe: args.recipe,
+    ...RECIPE_INFO[args.recipe],
+  };
+  s.recipes.push(recipe);
   const o: Order = {
     ...nextBase(s),
+    cartId: cart.id,
     externalKey: args.externalKey,
-    recipe: args.recipe,
+    recipeId: recipe.id,
     arrivalTick: s.run.tick,
     deadlineTick: s.run.tick + args.deadlineInTicks,
     value: args.value,
@@ -219,7 +253,9 @@ export function addOrder(
   for (const d of defs) {
     const task: Task = {
       ...nextBase(s),
+      cartId: o.cartId,
       orderId: o.id,
+      recipeId: o.recipeId,
       kind: d.kind,
       role: d.role,
       status: 'blocked',
@@ -254,8 +290,30 @@ export function addOrder(
       });
   refreshReady(s);
   s.run.version++;
-  emit(s, 'order_arrived', args.recipe, { orderId: o.id });
+  emit(s, 'order_arrived', args.recipe, { cartId: o.cartId, orderId: o.id });
   return o;
+}
+export function recipeOf(s: State, o: Order): Recipe {
+  const r = s.recipes.find((r) => r.id === o.recipeId);
+  if (!r) throw new Error('RECIPE_NOT_FOUND');
+  return r;
+}
+// Cart status is the least-advanced status among its orders.
+function refreshCartStatus(s: State, cartId: bigint): void {
+  const cart = s.carts.find((c) => c.id === cartId);
+  if (!cart) throw new Error('CART_NOT_FOUND');
+  const statuses = s.orders
+    .filter((o) => o.cartId === cartId)
+    .map((o) => o.status);
+  const next: CartStatus = statuses.includes('open')
+    ? 'open'
+    : statuses.includes('delivered')
+      ? 'delivered'
+      : 'cleaned';
+  if (cart.status !== next) {
+    cart.status = next;
+    emit(s, `cart_${next}`, cart.externalKey, { cartId });
+  }
 }
 export function blockedReason(s: State, t: Task): string {
   if (!['blocked', 'ready'].includes(t.status)) return t.status;
@@ -436,7 +494,7 @@ function admit(s: State, a: Assignment, policy: string): void {
       taskId: t.id.toString(),
       orderId: order.id.toString(),
       attempt: t.attempt,
-      recipe: order.recipe,
+      recipe: recipeOf(s, order).recipe,
       action: t.kind,
       tick: s.run.tick,
     }),
@@ -569,10 +627,12 @@ export function finishTask(s: State, taskId: bigint, attempt: number): void {
   }
   emit(s, 'task_succeeded', t.kind, {
     taskId: t.id,
+    cartId: o.cartId,
     orderId: o.id,
     workerId: w.id,
     attempt,
   });
+  refreshCartStatus(s, o.cartId);
   refreshReady(s);
 }
 export function advance(s: State): void {
@@ -670,6 +730,8 @@ export function assertInvariants(s: State): void {
   const orders = new Map(s.orders.map((o) => [o.id, o]));
   for (const group of [
     s.members,
+    s.carts,
+    s.recipes,
     s.orders,
     s.tasks,
     s.dependencies,
@@ -686,6 +748,23 @@ export function assertInvariants(s: State): void {
     for (const row of group)
       if (row.runId !== s.run.id || row.key !== `${row.runId}:${row.id}`)
         throw new Error('CROSS_RUN_ROW');
+  // Every order sits in a cart and owns exactly one recipe row (1:1).
+  const recipeOwners = new Set<bigint>();
+  for (const o of s.orders) {
+    if (!s.carts.some((c) => c.id === o.cartId)) throw new Error('ORDER_CART');
+    if (
+      !s.recipes.some((r) => r.id === o.recipeId) ||
+      recipeOwners.has(o.recipeId)
+    )
+      throw new Error('ORDER_RECIPE');
+    recipeOwners.add(o.recipeId);
+  }
+  if (recipeOwners.size !== s.recipes.length) throw new Error('ORPHAN_RECIPE');
+  for (const t of s.tasks) {
+    const o = orders.get(t.orderId);
+    if (o && (o.cartId !== t.cartId || o.recipeId !== t.recipeId))
+      throw new Error('TASK_ORDER_LINK');
+  }
   for (const d of s.dependencies) {
     if (
       !tasks.has(d.predecessorId) ||

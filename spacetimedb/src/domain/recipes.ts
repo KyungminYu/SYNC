@@ -16,6 +16,17 @@ export const ROLE_CAPACITIES = {
 } as const;
 export type Role = keyof typeof ROLE_CAPACITIES;
 export type RecipeId = 'black_coffee' | 'latte';
+// Display metadata copied into each order's recipe row.
+export const RECIPE_INFO: Record<
+  RecipeId,
+  { name: string; description: string }
+> = {
+  black_coffee: {
+    name: 'Black coffee',
+    description: 'Brewed coffee, no milk.',
+  },
+  latte: { name: 'Latte', description: 'Brewed coffee with steamed milk.' },
+};
 export const TASK_KINDS = [
   'capture_order',
   'take_payment',

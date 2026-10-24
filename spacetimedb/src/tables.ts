@@ -32,14 +32,41 @@ export const members = table(
     enabled: t.bool(),
   },
 );
+
+// One cart per customer checkout; a cart owns many orders (one order per menu item).
+export const carts = table(
+  { name: 'sync_carts', public: false },
+  {
+    key: t.string().primaryKey(),
+    id: t.u64(),
+    runId: t.u64().index('btree'),
+    externalKey: t.string(),
+    arrivalTick: t.u32(),
+    status: t.string(),
+  },
+);
+// One recipe row per order (1:1); `recipe` is the recipe kind used to materialize tasks.
+export const recipes = table(
+  { name: 'sync_recipes', public: false },
+  {
+    key: t.string().primaryKey(),
+    id: t.u64(),
+    runId: t.u64().index('btree'),
+    recipe: t.string(),
+    name: t.string(),
+    description: t.string(),
+  },
+);
 export const orders = table(
   { name: 'sync_orders', public: false },
   {
     key: t.string().primaryKey(),
     id: t.u64(),
     runId: t.u64().index('btree'),
+    cartId: t.u64().index('btree'),
     externalKey: t.string(),
-    recipe: t.string(),
+    // Run-local id, so 1:1 is enforced by the engine, not a global unique index.
+    recipeId: t.u64().index('btree'),
     arrivalTick: t.u32(),
     deadlineTick: t.u32(),
     value: t.u32(),
@@ -58,7 +85,9 @@ export const tasks = table(
     key: t.string().primaryKey(),
     id: t.u64(),
     runId: t.u64().index('btree'),
+    cartId: t.u64().index('btree'),
     orderId: t.u64().index('btree'),
+    recipeId: t.u64(),
     kind: t.string(),
     role: t.string(),
     status: t.string(),
@@ -198,6 +227,7 @@ export const events = table(
     tick: t.u32(),
     type: t.string(),
     taskId: t.option(t.u64()),
+    cartId: t.option(t.u64()),
     orderId: t.option(t.u64()),
     workerId: t.option(t.u64()),
     attempt: t.option(t.u32()),
@@ -232,6 +262,8 @@ export const clock = table(
 export const db = schema({
   run,
   members,
+  carts,
+  recipes,
   orders,
   tasks,
   dependencies,

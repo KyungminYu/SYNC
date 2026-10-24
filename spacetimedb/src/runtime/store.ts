@@ -83,6 +83,8 @@ export function save(store: MutableDb, state: State): void {
   store.run.id.update(state.run);
   // Explicit calls preserve row/table correlation under strict TypeScript.
   saveTable(store.members, state.members, state.run.id);
+  saveTable(store.carts, state.carts, state.run.id);
+  saveTable(store.recipes, state.recipes, state.run.id);
   saveTable(store.orders, state.orders, state.run.id);
   saveTable(store.tasks, state.tasks, state.run.id);
   saveTable(store.dependencies, state.dependencies, state.run.id);

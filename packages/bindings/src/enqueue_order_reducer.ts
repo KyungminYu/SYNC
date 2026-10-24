@@ -13,6 +13,7 @@ import {
 export default {
   runId: __t.u64(),
   externalKey: __t.string(),
+  cartKey: __t.option(__t.string()),
   recipe: __t.string(),
   deadlineInTicks: __t.u32(),
   value: __t.u32(),

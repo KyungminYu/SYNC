@@ -38,9 +38,23 @@ export type Member = Base & {
   permission: 'viewer' | 'operator' | 'service';
   enabled: boolean;
 };
-export type Order = Base & {
+export type CartStatus = 'open' | 'delivered' | 'cleaned';
+// A customer checkout grouping many orders (one order per menu item).
+export type Cart = Base & {
   externalKey: string;
+  arrivalTick: number;
+  status: CartStatus;
+};
+// One recipe row per order (1:1, referenced by Order.recipeId).
+export type Recipe = Base & {
   recipe: RecipeId;
+  name: string;
+  description: string;
+};
+export type Order = Base & {
+  cartId: bigint;
+  externalKey: string;
+  recipeId: bigint;
   arrivalTick: number;
   deadlineTick: number;
   value: number;
@@ -53,7 +67,10 @@ export type Order = Base & {
   trayId?: bigint;
 };
 export type Task = Base & {
+  // Denormalized from the owning order for cart- and recipe-scoped lookups.
+  cartId: bigint;
   orderId: bigint;
+  recipeId: bigint;
   kind: TaskKind;
   role: string;
   status: TaskStatus;
@@ -139,6 +156,7 @@ export type Event = Base & {
   tick: number;
   type: string;
   taskId?: bigint;
+  cartId?: bigint;
   orderId?: bigint;
   workerId?: bigint;
   attempt?: number;
@@ -158,6 +176,8 @@ export type Telemetry = Base & {
 export type State = {
   run: Run;
   members: Member[];
+  carts: Cart[];
+  recipes: Recipe[];
   orders: Order[];
   tasks: Task[];
   dependencies: Dependency[];
@@ -176,6 +196,8 @@ export type Principal = {
 };
 export const STATE_TABLES = [
   'members',
+  'carts',
+  'recipes',
   'orders',
   'tasks',
   'dependencies',
