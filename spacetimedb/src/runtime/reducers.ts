@@ -102,6 +102,7 @@ export const enqueue_order = db.reducer(
   {
     runId: t.u64(),
     externalKey: t.string(),
+    cartKey: t.option(t.string()),
     recipe: t.string(),
     deadlineInTicks: t.u32(),
     value: t.u32(),
@@ -115,7 +116,7 @@ export const enqueue_order = db.reducer(
     addOrder(
       s,
       { identityHex: ctx.sender.toHexString() },
-      { ...args, recipe: args.recipe },
+      { ...args, cartKey: args.cartKey ?? undefined, recipe: args.recipe },
     );
     schedule(s);
     save(store, s);

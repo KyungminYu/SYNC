@@ -4,7 +4,12 @@ import { readableRuns, serviceRuns } from './store.ts';
 import type { ViewDb } from './store.ts';
 import type { State } from '../domain/model.ts';
 import { emptyState } from '../domain/engine.ts';
-import { blockedReason, freeUnits, downstreamTail } from '../domain/engine.ts';
+import {
+  blockedReason,
+  freeUnits,
+  downstreamTail,
+  recipeOf,
+} from '../domain/engine.ts';
 import { TASK_STEPS } from '../domain/recipes.ts';
 import { DEFAULT_POLICY_CONFIG } from '../policies/scheduler.ts';
 // No table .iter() in views: every read is an indexed find/filter.
@@ -23,6 +28,8 @@ const runRow = t.row('UiRunPayload', {
 });
 const orderRow = t.row('UiOrderPayload', {
   ...base,
+  // Customer cart this order (menu item) belongs to.
+  cart_key: t.string(),
   recipe: t.string(),
   status: t.string(),
   arrival_tick: t.u32(),
@@ -201,6 +208,8 @@ export const ui_orders = db.view(
   t.array(orderRow),
   (ctx) =>
     states(ctx.db as unknown as ViewDb, ctx.sender.toHexString(), [
+      'carts',
+      'recipes',
       'orders',
       'tasks',
     ]).flatMap((s) =>
@@ -208,7 +217,8 @@ export const ui_orders = db.view(
         const tasks = s.tasks.filter((t) => t.orderId === o.id);
         return {
           ...rowBase(o),
-          recipe: o.recipe,
+          cart_key: s.carts.find((c) => c.id === o.cartId)!.externalKey,
+          recipe: recipeOf(s, o).recipe,
           status: o.status,
           arrival_tick: o.arrivalTick,
           deadline_tick: o.deadlineTick,
