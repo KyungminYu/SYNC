@@ -221,7 +221,6 @@ export function mapRun(
   scenario = 'Live run',
 ): RunData {
   const { layout, slotOf } = liveLayout(rows.workers, policy === 'baseline');
-  const resourceType = new Map(layout.resources.map((r) => [r.id, r.type]));
   const agentName = new Map(layout.agents.map((a) => [a.id, a.name]));
 
   // Customers: orders grouped by cart, drinks in enqueue (id) order.
@@ -531,9 +530,11 @@ export function mapRun(
     const slotLabel =
       layout.resources.find((r) => r.id === where.resourceId)?.label ??
       where.resourceId;
-    const primary: ResourceType | undefined = resourceType.get(
-      where.resourceId,
-    );
+    // The decision names the worker the engine chose (the floor may draw
+    // the slot's own person instead); helping = that worker's role differs
+    // from the task's.
+    const worker = slotOf.get(String(d.workerId))?.agentId ?? where.agentId;
+    const own = layout.agents.find((a) => a.id === worker)?.primaryTypes;
     decisions.push({
       id: `d${d.sequence}`,
       t: d.tick,
@@ -541,10 +542,10 @@ export function mapRun(
       jobId: task.jobId,
       taskId: task.id,
       taskLabel: task.label,
-      agentId: where.agentId,
+      agentId: worker,
       resourceId: where.resourceId,
-      crossRole: primary !== undefined && primary !== task.type,
-      summary: `${task.jobId} ${task.label} → ${agentName.get(where.agentId)} @ ${slotLabel}`,
+      crossRole: own !== undefined && !own.includes(task.type),
+      summary: `${task.jobId} ${task.label} → ${agentName.get(worker)} @ ${slotLabel}`,
       detail: `score ${d.score.toFixed(2)} · reasons: ${d.reasonCodes.join(', ')}`,
       candidates: [],
       admission: {
