@@ -1,4 +1,5 @@
 import type { State } from './model.ts';
+import { readPolicy } from './model.ts';
 import { emit } from './engine.ts';
 /** Staffing is separate from station capacity. Busy and uncertain workers drain safely. */
 export function adaptStaffing(s: State): void {
@@ -24,7 +25,9 @@ export function adaptStaffing(s: State): void {
     );
     const second = slots[1];
     if (!second) continue;
-    const wanted = upcoming.length >= 2;
+    // γ (execution cost weight) raises the queue needed to add a second worker.
+    const threshold = 2 + Math.round(2 * (readPolicy(s).executionWeight ?? 0));
+    const wanted = upcoming.length >= threshold;
     if (wanted && !second.enabled) {
       second.enabled = true;
       emit(s, 'worker_activated', role, { workerId: second.id });

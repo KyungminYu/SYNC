@@ -34,4 +34,5 @@ export default __t.row({
   steps: __t.array(__t.string()),
   errorCode: __t.option(__t.string()).name("error_code"),
   estimatedSlackTicks: __t.option(__t.i64()).name("estimated_slack_ticks"),
+  priority: __t.u32(),
 });

@@ -30,7 +30,23 @@ const run = (id: string) =>
 
 it('round-trips live run names and ignores other names', () => {
   expect(runName('Mid', 2, 'sync')).toBe('Mid-2 · SYNC');
-  expect(parseRunName('Mid-2 · SYNC')).toEqual({ scenario: 'Mid-2', load: 'Mid', n: 2, policy: 'sync' });
+  expect(parseRunName('Mid-2 · SYNC')).toEqual({
+    scenario: 'Mid-2',
+    load: 'Mid',
+    n: 2,
+    policy: 'sync',
+    planner: 'algorithm',
+  });
+  // LLM-tuned runs keep their own scenario id, apart from algorithm results.
+  expect(runName('Mid', 2, 'sync', 'b1', 'llm')).toBe('Mid-2 · SYNC · LLM [b1]');
+  expect(parseRunName('Mid-2 · SYNC · LLM [b1]')).toEqual({
+    scenario: 'Mid-2 · LLM',
+    load: 'Mid',
+    n: 2,
+    policy: 'sync',
+    planner: 'llm',
+    batch: 'b1',
+  });
   expect(parseRunName('SYNC sync_greedy · seed 5')).toBeUndefined();
 });
 

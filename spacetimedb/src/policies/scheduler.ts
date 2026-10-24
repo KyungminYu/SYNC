@@ -73,6 +73,16 @@ export interface PolicyConfig {
   maxAgeTicks: number;
   candidatesPerWorker: number;
   maxBranches: number;
+  /**
+   * Planning weights of the objective (primal_dual), tunable at run time by an
+   * external planner; the score that judges a run keeps fixed weights.
+   * β: lateness per tick (penalty for missing deadlines).
+   */
+  deadlineWeight: number;
+  /** γ: modeled execution cost (per 1000 µUSD) and eagerness to add staff. */
+  executionWeight: number;
+  /** δ: coordination cost; higher means less planning effort per tick. */
+  coordinationWeight: number;
 }
 export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   policy: 'sync_greedy',
@@ -88,6 +98,9 @@ export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   maxAgeTicks: 300,
   candidatesPerWorker: 4,
   maxBranches: 2000,
+  deadlineWeight: 0.1,
+  executionWeight: 0,
+  coordinationWeight: 0,
 };
 const POLICY_NAMES: readonly PolicyName[] = [
   'fcfs',
@@ -118,6 +131,9 @@ export function validatePolicyConfig(config: PolicyConfig): void {
     'costWeight',
     'priorityWeight',
     'valueWeight',
+    'deadlineWeight',
+    'executionWeight',
+    'coordinationWeight',
   ] as const) {
     nonnegative(config[name], name);
     if (config[name] > 1000) throw new Error(`${name} exceeds supported limit`);

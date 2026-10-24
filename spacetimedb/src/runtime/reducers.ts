@@ -13,6 +13,7 @@ import {
   addOrder,
   setMember,
   setPolicy,
+  setTaskPriorities,
   setRunning,
   closeArrivals,
   advance,
@@ -150,6 +151,9 @@ export const set_policy = db.reducer(
       'maxAgeTicks',
       'candidatesPerWorker',
       'maxBranches',
+      'deadlineWeight',
+      'executionWeight',
+      'coordinationWeight',
     ];
     if (Object.keys(patch).some((k) => !allowed.includes(k)))
       throw new Error('UNKNOWN_POLICY_FIELD');
@@ -161,6 +165,21 @@ export const set_policy = db.reducer(
       patch as Partial<PolicyConfig>,
     );
     schedule(s);
+    save(store, s);
+  },
+);
+/** Advisory per-task priorities from an external planner (owner/operator). */
+export const set_task_priorities = db.reducer(
+  { runId: t.u64(), taskIds: t.array(t.u64()), priorities: t.array(t.u32()) },
+  (ctx, args) => {
+    const store = ctx.db as unknown as MutableDb;
+    const s = load(store, args.runId);
+    setTaskPriorities(
+      s,
+      { identityHex: ctx.sender.toHexString() },
+      args.taskIds,
+      args.priorities,
+    );
     save(store, s);
   },
 );

@@ -4,6 +4,7 @@
  * are always exact. No React, no Phaser, no scoring or scheduling logic.
  */
 import type {
+  Layout,
   ResourceType,
   Role,
   RunData,
@@ -165,7 +166,12 @@ export function sceneAt(
   const slots = new Map(
     layout.resources.map((r) => [
       r.id,
-      { busy: undefined as SyncEvent | undefined, claimed: false },
+      {
+        busy: undefined as SyncEvent | undefined,
+        /** Tasks running here now; one person may work two at one slot. */
+        active: [] as SyncEvent[],
+        claimed: false,
+      },
     ]),
   );
   const agents = new Map(
@@ -176,6 +182,8 @@ export function sceneAt(
         task: undefined as string | undefined,
         working: false,
         waiting: false,
+        /** Tasks this person is working now (busy until every one is done). */
+        active: new Set<string>(),
       },
     ]),
   );
@@ -238,13 +246,18 @@ export function sceneAt(
       // Work begins. Taking the order puts the customer at a register;
       // the hand off puts them at a pickup counter.
       case 'task.started':
-        if (agent)
+        if (agent) {
+          agent.active.add(e.taskId!);
           Object.assign(agent, {
             working: true,
             waiting: false,
             task: e.taskId,
           });
-        if (slot) slot.busy = e;
+        }
+        if (slot) {
+          slot.active.push(e);
+          slot.busy = e;
+        }
         // Only the first register task moves the customer; later ones (more
         // drinks, payment) keep them at the register they walked to.
         if (customer && type === 'register' && customer.stage === 'line')
@@ -273,8 +286,16 @@ export function sceneAt(
         break;
       // Work ends. After ordering, the customer moves to the waiting area.
       case 'task.finished':
-        if (agent) Object.assign(agent, { working: false, task: undefined });
-        if (slot) slot.busy = undefined;
+        // Still working (and the slot still busy) while another task runs there.
+        if (agent) {
+          agent.active.delete(e.taskId!);
+          agent.working = agent.active.size > 0;
+          agent.task = agent.working ? [...agent.active].at(-1) : undefined;
+        }
+        if (slot) {
+          slot.active = slot.active.filter((a) => a.taskId !== e.taskId);
+          slot.busy = slot.active.at(-1);
+        }
         if (customer && type === 'register')
           customer.registersDone = (customer.registersDone ?? 0) + 1;
         if (
@@ -358,7 +379,8 @@ export function sceneAt(
       const slot = slotViews.find(
         (v) => v.state === 'busy' && slots.get(v.id)!.busy?.agentId === a.id,
       );
-      if (s.working && slot) {
+      // Fixed (Baseline) staff work from their own spot; the slot shows progress.
+      if (s.working && slot && !a.fixed) {
         const location = resources.get(slot.id);
         if (location)
           pos = {
@@ -383,6 +405,8 @@ export function sceneAt(
         facing: 'down' as Facing,
       };
     });
+  // One person per slot: an idle person whose slot is taken holds an empty one.
+  clearSlots(agentViews, layout);
 
   const jobs = new Map(data.jobs.map((j) => [j.id, j]));
   const counterAt = (id?: string): Point => ({
@@ -479,6 +503,52 @@ export function sceneAt(
         ];
   const fromSpot = (spot: WaitingSpot, to: Point): Point[] =>
     [...toSpot(to, spot)].reverse();
+  /**
+   * Called to pickup: the walk from where the customer stands at the call
+   * (at their spot, still walking to it, or at the lane end) to the counter.
+   */
+  const readyWalk = (
+    id: string,
+    c: {
+      register?: string;
+      orderEnd?: number;
+      handoffStart?: number;
+      pickup?: string;
+    },
+    spot: WaitingSpot | undefined,
+  ) => {
+    const to = counterAt(c.pickup);
+    const from =
+      c.orderEnd === undefined
+        ? counterAt(c.register)
+        : walkAt(waitingRoute(c, spot), c.orderEnd, c.handoffStart!);
+    const route =
+      spot && 'done' in from && from.done
+        ? // At the spot: leave it (waiting for a busy aisle).
+          fromSpot(spot, to)
+        : // Still walking there, or no spot: straight from here.
+          [
+            from,
+            { x: from.x, y: lanes.counterY },
+            { x: to.x, y: lanes.counterY },
+            to,
+          ];
+    return { route, start: aisleStart.get(id) ?? c.handoffStart! };
+  };
+  /** Register → waiting spot, or → end of the counter lane when no spot is free. */
+  const waitingRoute = (
+    c: { register?: string },
+    spot: WaitingSpot | undefined,
+  ): Point[] => {
+    const reg = counterAt(c.register);
+    return spot
+      ? toSpot(reg, spot)
+      : [
+          reg,
+          { x: reg.x, y: lanes.counterY },
+          { x: lanes.spurX, y: lanes.counterY },
+        ];
+  };
 
   // Customers leaving a spot that shares an aisle go one at a time.
   const aisleFreeAt = new Map<number, number>();
@@ -560,24 +630,24 @@ export function sceneAt(
       // Called at once by a free register: the walk starts when they step in.
       p = walkAt(route, Math.max(c.orderStart!, c.entered!), t);
     } else if (c.stage === 'waiting') {
-      // From the register to the assigned spot, then stay there.
-      const reg = counterAt(c.register);
-      const route = spot
-        ? toSpot(reg, spot)
-        : [
-            reg,
-            { x: reg.x, y: lanes.counterY },
-            { x: lanes.spurX, y: lanes.counterY },
-          ];
-      p = walkAt(route, c.orderEnd!, t);
+      // From the register to the assigned spot (or, with every spot taken,
+      // the end of the counter lane), then stay there.
+      p = walkAt(waitingRoute(c, spot), c.orderEnd!, t);
     } else if (c.stage === 'ready') {
-      // Called: leave the spot (waiting for a busy aisle) and go to pickup.
-      const to = counterAt(c.pickup);
-      const route = spot ? fromSpot(spot, to) : [counterAt(c.register), to];
-      p = walkAt(route, aisleStart.get(id) ?? c.handoffStart!, t);
+      const walk = readyWalk(id, c, spot);
+      p = walkAt(walk.route, walk.start, t);
     } else {
       // Served: counter lane to the exit lane, then out through the door.
-      const pick = counterAt(c.pickup);
+      // Leave from where they are when served: on the way to (or at) the
+      // pickup counter, or, when never called to one (the order completed
+      // without a hand-off at a counter), where they waited; never from a
+      // counter they had not reached.
+      const walk = c.pickup !== undefined ? readyWalk(id, c, spot) : undefined;
+      const pick = walk
+        ? walkAt(walk.route, walk.start, c.completed!)
+        : c.orderEnd === undefined
+          ? counterAt(c.register)
+          : walkAt(waitingRoute(c, spot), c.orderEnd, c.completed!);
       const route = [
         pick,
         { x: pick.x, y: lanes.counterY },
@@ -620,6 +690,82 @@ export function sceneAt(
     customers: customerViews,
     done,
     late,
+  };
+}
+
+/**
+ * One person per slot, no breaks (Figma "Staff rules v4"): when people stand
+ * on the same spot (a helper working a colleague's slot), the one working
+ * keeps it and each other person holds the nearest empty slot — a free slot
+ * of their own type first, else the closest free one in the same row (a
+ * straight step along the counter; a row always has one free). Fixed
+ * (Baseline) staff never move. Mutates the views in place; positions only.
+ */
+export function clearSlots(views: AgentView[], layout: Layout) {
+  const fixed = new Set(layout.agents.filter((a) => a.fixed).map((a) => a.id));
+  const own = new Map(layout.agents.map((a) => [a.id, a.primaryTypes]));
+  const stand = (r: Layout['resources'][number]) => ({
+    x: r.standX ?? r.x,
+    y: r.standY ?? r.y,
+  });
+  // Same spot = same position to 1/100 of a tile (walkers mid-route never match).
+  const key = (p: { x: number; y: number }) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`;
+  const spots = new Map<string, AgentView[]>();
+  for (const v of views) spots.set(key(v), [...(spots.get(key(v)) ?? []), v]);
+  const taken = new Set(spots.keys());
+  for (const group of spots.values()) {
+    if (group.length < 2) continue;
+    // Working first, then fixed staff (never move), then layout order.
+    const rank = (v: AgentView) =>
+      (v.state === 'working' ? 2 : 0) + (fixed.has(v.id) ? 1 : 0);
+    const ordered = [...group].sort((a, b) => rank(b) - rank(a));
+    for (const v of ordered.slice(1)) {
+      if (fixed.has(v.id)) continue;
+      const free = layout.resources
+        .filter((r) => !taken.has(key(stand(r))))
+        // Same row only, so the step is never diagonal.
+        .filter((r) => Math.abs(stand(r).y - v.y) < 0.01)
+        .sort(
+          (a, b) =>
+            Number(!own.get(v.id)?.includes(a.type)) -
+              Number(!own.get(v.id)?.includes(b.type)) ||
+            Math.hypot(stand(a).x - v.x, stand(a).y - v.y) -
+              Math.hypot(stand(b).x - v.x, stand(b).y - v.y),
+        );
+      if (!free.length) continue;
+      const to = stand(free[0]);
+      taken.add(key(to));
+      v.x = to.x;
+      v.y = to.y;
+    }
+  }
+}
+
+/**
+ * The shop with nobody in it: every slot idle, no staff, no customers, no
+ * ropes. Drawn when there is no run yet, so the floor keeps its layout
+ * instead of disappearing (Figma "SYNC Dashboard · Empty (no scenario)").
+ */
+export function emptyScene(layout: Layout, lanes: Lanes): Scene {
+  return {
+    t: 0,
+    zones: layout.zones,
+    lanes,
+    queueFolded: false,
+    lineLength: 0,
+    slots: layout.resources.map((r) => ({
+      id: r.id,
+      label: r.label,
+      type: r.type,
+      x: r.x,
+      y: r.y,
+      state: 'idle',
+      progress: null,
+    })),
+    agents: [],
+    customers: [],
+    done: 0,
+    late: 0,
   };
 }
 

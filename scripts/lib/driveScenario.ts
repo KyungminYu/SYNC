@@ -40,6 +40,10 @@ export interface DriveOptions {
   signal?: AbortSignal;
   /** Called once both runs exist. */
   onRuns?(ids: { baseline: bigint; sync: bigint }): void;
+  /** SYNC planner, recorded in the run names ("… · LLM"). Default 'algorithm'. */
+  planner?: 'algorithm' | 'llm';
+  /** Called before each step (e.g. an LLM planner); must not block. */
+  beforeStep?(tick: number): void;
   log?(line: string): void;
 }
 
@@ -72,8 +76,14 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
   const { seed, signal, log = () => {} } = o;
   const batch = randomUUID();
   const runs = [
-    { name: runName(o.load, o.n, 'baseline', batch), policy: 'fcfs' },
-    { name: runName(o.load, o.n, 'sync', batch), policy: 'primal_dual' },
+    {
+      name: runName(o.load, o.n, 'baseline', batch, o.planner),
+      policy: 'fcfs',
+    },
+    {
+      name: runName(o.load, o.n, 'sync', batch, o.planner),
+      policy: 'primal_dual',
+    },
   ] as const;
   // The engine allows 10 runs per owner and only reports a generic error when
   // the limit is hit, so check first. Runs this identity controls = owned runs.
@@ -192,6 +202,7 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
     }
     const open = ids.filter((id) => status(id)?.status !== 'completed');
     if (!open.length) break;
+    o.beforeStep?.(tick);
     // Step both runs together, then wait until each has moved a tick.
     await Promise.all(open.map((runId) => conn.reducers.stepRun({ runId })));
     timing.mark('step');

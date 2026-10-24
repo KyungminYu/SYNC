@@ -195,6 +195,35 @@ export function setPolicy(
   s.run.version++;
   emit(s, 'policy_changed', config.policy);
 }
+/**
+ * Advisory priorities from an external planner (e.g. an LLM coordinator).
+ * Only tasks that have not started take the new value; tasks already
+ * assigned or finished are skipped, so a late answer is harmless. Policies
+ * read `priority` as one term of their score; admission is unchanged.
+ */
+export function setTaskPriorities(
+  s: State,
+  actor: Principal,
+  taskIds: bigint[],
+  priorities: number[],
+): void {
+  requireControl(s, actor);
+  if (taskIds.length !== priorities.length || taskIds.length > 500)
+    throw new Error('INVALID_PRIORITIES');
+  let changed = 0;
+  for (const [i, id] of taskIds.entries()) {
+    assertInteger(priorities[i]!, 0, 100, 'PRIORITY');
+    const t = s.tasks.find((t) => t.id === id);
+    if (!t) throw new Error('UNKNOWN_TASK');
+    if (t.status !== 'blocked' && t.status !== 'ready') continue;
+    if (t.priority === priorities[i]) continue;
+    t.priority = priorities[i]!;
+    changed++;
+  }
+  if (!changed) return;
+  s.run.version++;
+  emit(s, 'priorities_set', `${changed} tasks`);
+}
 export function addOrder(
   s: State,
   actor: Principal,
@@ -418,6 +447,7 @@ export function snapshot(s: State): Snapshot {
       (readPolicy(s).policy !== 'primal_dual' ||
         !admissionBackpressure(s, t.id)),
   );
+  const ownRoleOnly = readPolicy(s).policy === 'fcfs';
   return {
     tick: s.run.tick,
     budgetRemainingMicrousd:
@@ -449,11 +479,15 @@ export function snapshot(s: State): Snapshot {
       .map((w) => ({
         id: w.id,
         capabilities: w.capabilities,
-        estimates: tasks.map((t) => ({
-          taskId: t.id,
-          durationTicks: duration(s, t, w.id),
-          costMicrousd: t.estimatedCostMicrousd,
-        })),
+        // Baseline (fcfs) keeps everyone to their own role's tasks; other
+        // policies may let a capable worker help.
+        estimates: tasks
+          .filter((t) => !ownRoleOnly || t.role === w.role)
+          .map((t) => ({
+            taskId: t.id,
+            durationTicks: duration(s, t, w.id),
+            costMicrousd: t.estimatedCostMicrousd,
+          })),
       })),
     resources: s.resources.map((r) => ({
       id: r.id,

@@ -22,6 +22,7 @@ import SetPolicyReducer from "../set_policy_reducer";
 import SetResourceAvailableReducer from "../set_resource_available_reducer";
 import SetResourceCapacityReducer from "../set_resource_capacity_reducer";
 import SetRunStatusReducer from "../set_run_status_reducer";
+import SetTaskPrioritiesReducer from "../set_task_priorities_reducer";
 import StepRunReducer from "../step_run_reducer";
 import SubmitAgentActionReducer from "../submit_agent_action_reducer";
 
@@ -41,6 +42,7 @@ export type SetPolicyParams = __Infer<typeof SetPolicyReducer>;
 export type SetResourceAvailableParams = __Infer<typeof SetResourceAvailableReducer>;
 export type SetResourceCapacityParams = __Infer<typeof SetResourceCapacityReducer>;
 export type SetRunStatusParams = __Infer<typeof SetRunStatusReducer>;
+export type SetTaskPrioritiesParams = __Infer<typeof SetTaskPrioritiesReducer>;
 export type StepRunParams = __Infer<typeof StepRunReducer>;
 export type SubmitAgentActionParams = __Infer<typeof SubmitAgentActionReducer>;
 

@@ -115,14 +115,12 @@ describe('mapRun', () => {
 
   it('produces contract-valid rows', () => {
     expect(checkRun(data)).toEqual([]);
+    // Seven engine workers, one person per role on the floor.
     expect(data.layout.agents.map((a) => a.id)).toEqual([
-      'cashier1',
-      'cashier2',
-      'barista1',
-      'barista2',
-      'server1',
-      'server2',
-      'cleaner1',
+      'cashier',
+      'barista',
+      'server',
+      'cleaner',
     ]);
   });
 
@@ -147,7 +145,7 @@ describe('mapRun', () => {
   it('maps decisions to assign rows with score and reasons', () => {
     expect(data.decisions[0]).toMatchObject({
       kind: 'assign',
-      agentId: 'cashier1',
+      agentId: 'cashier',
       resourceId: 'reg1',
       candidates: [],
       detail: 'score 0.82 · reasons: sync_greedy, compatible_worker',
@@ -292,4 +290,92 @@ it('shared task membership and dependency edges survive mapping without duplicat
     ),
   ).toHaveLength(1);
   expect(checkRun(data)).toEqual([]);
+});
+
+describe('one person per role and per slot', () => {
+  const ids = (d: ReturnType<typeof normalizeRun>, t: number) =>
+    sceneAt(d, t).agents.map((a) => a.id);
+
+  it('draws one person per role even when two engine workers work at once', () => {
+    // Cashier 1 and cashier 2 both take an order at tick 11.
+    const data = normalizeRun(mapRun(rows, 'sync'));
+    expect(ids(data, 12)).toEqual(['cashier', 'barista', 'server', 'cleaner']);
+    const scene = sceneAt(data, 12);
+    // No work without a person: both orders are taken at the cashier's register.
+    expect(scene.slots.filter((s) => s.state === 'busy').map((s) => s.id)).toEqual(['reg1']);
+    const cashier = scene.agents.find((a) => a.id === 'cashier')!;
+    expect(cashier).toMatchObject({ state: 'working', x: 2.5, y: 3.5 });
+  });
+
+  it('keeps a person at their slot until every task they hold is done', () => {
+    // Cashier 2's payment runs to tick 16, past cashier 1's (15): one person, one slot.
+    const data = normalizeRun(mapRun(rows, 'sync'));
+    for (const t of [13, 14, 15]) {
+      const scene = sceneAt(data, t);
+      expect(scene.agents.find((a) => a.id === 'cashier')).toMatchObject({ state: 'working', x: 2.5 });
+      expect(scene.slots.find((s) => s.id === 'reg2')?.state).toBe('idle');
+    }
+    expect(sceneAt(data, 16.5).agents.find((a) => a.id === 'cashier')?.state).toBe('idle');
+  });
+
+  it('keeps everyone at their post: the slot type owner takes its work (SYNC)', () => {
+    // The engine's server 1 collects a tray: the Cleaner does it at the sink,
+    // the Server stays at Pickup 1 (nobody walks, no slot waits for a walker).
+    const data = normalizeRun(
+      mapRun(
+        { ...rows, tasks: [...rows.tasks, task(11n, 'collect_tray', 'cleaner', 21n, 35, 37)] },
+        'sync',
+      ),
+    );
+    const at = sceneAt(data, 36).agents;
+    expect(at.find((a) => a.id === 'cleaner')).toMatchObject({ state: 'working', x: 14.5, y: 2.5 });
+    expect(at.find((a) => a.id === 'server')).toMatchObject({ state: 'idle', x: 11.5, y: 3.5 });
+  });
+
+  it('hands drinks over at a pickup counter even when a Baseline cashier does it', () => {
+    // The engine's cashier 1 delivers order 12: still at a pickup, never a register.
+    const data = normalizeRun(
+      mapRun(
+        {
+          ...rows,
+          tasks: rows.tasks.map((t) =>
+            t.kind === 'deliver_order' && t.orderId === 12n ? { ...t, workerId: 1n } : t,
+          ),
+        },
+        'baseline',
+      ),
+    );
+    const handoffs = data.events.filter((e) => {
+      const k = data.tasks.find((x) => x.id === e.taskId);
+      return e.type === 'task.started' && k?.type === 'pickup' && k.customerHandoff !== false;
+    });
+    expect(handoffs.length).toBeGreaterThan(0);
+    for (const e of handoffs)
+      expect(data.layout.resources.find((r) => r.id === e.resourceId)?.type).toBe('pickup');
+    expect(checkRun(data)).toEqual([]);
+  });
+
+  it('never moves Baseline staff; cross-role work is done at their own slot', () => {
+    const helped = normalizeRun(
+      mapRun(
+        { ...rows, tasks: [...rows.tasks, task(11n, 'collect_tray', 'cleaner', 21n, 35, 37)] },
+        'baseline',
+      ),
+    );
+    expect(checkRun(helped)).toEqual([]);
+    const scene = sceneAt(helped, 36);
+    const server = scene.agents.find((a) => a.id === 'server')!;
+    expect(server).toMatchObject({ state: 'working', helping: true, x: 11.5, y: 3.5 });
+    // The tray is collected at the server's own pickup, never at an empty sink.
+    expect(scene.slots.find((s) => s.id === 'pick1')?.state).toBe('busy');
+    expect(scene.slots.find((s) => s.id === 'clean1')?.state).toBe('idle');
+    const cleaner = scene.agents.find((a) => a.id === 'cleaner')!;
+    expect(cleaner).toMatchObject({ x: 14.5, y: 2.5 });
+    // No staff position ever changes in Baseline.
+    for (let t = 0; t <= 40; t++)
+      for (const a of sceneAt(helped, t).agents) {
+        const home = helped.layout.agents.find((h) => h.id === a.id)!;
+        expect([a.x, a.y]).toEqual([home.startX, home.startY]);
+      }
+  });
 });

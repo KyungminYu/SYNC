@@ -525,6 +525,7 @@ export const UiTaskPayload = __t.object("UiTaskPayload", {
   steps: __t.array(__t.string()),
   errorCode: __t.option(__t.string()),
   estimatedSlackTicks: __t.option(__t.i64()),
+  priority: __t.u32(),
 });
 export type UiTaskPayload = __Infer<typeof UiTaskPayload>;
 

@@ -4,6 +4,7 @@ import type { Policy } from '../contract';
 import type { ScenarioOption, SyncSnapshot, SyncSource } from '../source';
 import { mapRun, type DecisionRow, type RunRow, type RunRows } from './mapRun';
 import { LOADS, parseRunName } from './scenarioNames';
+import type { Planner } from '../runner';
 
 /**
  * Read-only SpacetimeDB adapter: subscribes to the `ui_*` views and turns the
@@ -61,6 +62,8 @@ interface Scenario {
   id: string;
   load: string;
   n: number;
+  /** Fixed scenario ("Mid-2") and SYNC planner; absent for external runs. */
+  run?: { scenario: string; planner: Planner };
   runs: Partial<Record<Policy, RunRow>>;
 }
 
@@ -84,6 +87,7 @@ export function scenariosOf(runs: RunRow[], completedOnly = false): Scenario[] {
       id: p.scenario,
       load: p.load,
       n: p.n,
+      run: { scenario: `${p.load}-${p.n}`, planner: p.planner },
       runs: {},
     };
     // Keep the newest run if a name repeats.
@@ -102,8 +106,11 @@ export function scenariosOf(runs: RunRow[], completedOnly = false): Scenario[] {
     const old = latest.get(s.id);
     if (!old || newestId(s) > newestId(old)) latest.set(s.id, s);
   }
+  // Algorithm results first, then LLM ones, each Low → High.
+  const llm = (s: Scenario) => (s.run?.planner === 'llm' ? 1 : 0);
   return [...latest.values()].sort(
     (a, b) =>
+      llm(a) - llm(b) ||
       LOADS.indexOf(a.load as never) - LOADS.indexOf(b.load as never) ||
       a.n - b.n,
   );
@@ -114,6 +121,12 @@ const done = (s: Scenario) =>
     ? s.runs.sync?.status === 'completed'
     : s.runs.baseline?.status === 'completed' &&
       s.runs.sync?.status === 'completed';
+/**
+ * Scenario tick: the furthest of its runs. One run can finish first (e.g.
+ * SYNC), while the other still moves; the pair is running until both stop.
+ */
+const tickOf = (s: Scenario) =>
+  Math.max(s.runs.baseline?.tick ?? 0, s.runs.sync?.tick ?? 0);
 /** Highest run id in a scenario: the most recently created one. */
 const newestId = (s: Scenario) =>
   [s.runs.baseline?.id ?? 0n, s.runs.sync?.id ?? 0n].reduce((a, b) =>
@@ -151,6 +164,8 @@ export class SpacetimeSyncSource implements SyncSource {
    * so older ones are remembered here to keep the full history on screen.
    */
   private decisions = new Map<string, Map<string, DecisionRow>>();
+  /** Engine objective (net reward) per run and tick, as seen so far. */
+  private objectives = new Map<string, Map<number, number>>();
 
   constructor(private readonly mode: SpacetimeMode = 'live') {
     this.delivery = mode === 'stored' ? 'replay' : 'stream';
@@ -307,10 +322,18 @@ export class SpacetimeSyncSource implements SyncSource {
     const visible = new Set([...db.uiRuns.iter()].map((r) => String(r.id)));
     for (const id of this.decisions.keys())
       if (!visible.has(id)) this.decisions.delete(id);
+    for (const id of this.objectives.keys())
+      if (!visible.has(id)) this.objectives.delete(id);
     const orders = [...db.uiOrders.iter()];
     const tasks = [...db.uiTasks.iter()];
     const workers = [...db.uiWorkers.iter()];
     const metrics = [...db.uiMetrics.iter()];
+    for (const m of metrics) {
+      const key = String(m.runId);
+      const seen = this.objectives.get(key) ?? new Map<number, number>();
+      seen.set(m.tick, m.netReward);
+      this.objectives.set(key, seen);
+    }
     for (const d of db.uiDecisions.iter()) {
       const key = String(d.runId);
       const seen = this.decisions.get(key) ?? new Map<string, DecisionRow>();
@@ -325,6 +348,7 @@ export class SpacetimeSyncSource implements SyncSource {
       workers: workers.filter((w) => w.runId === run.id),
       decisions: [...(this.decisions.get(String(run.id))?.values() ?? [])],
       metrics: metrics.find((m) => m.runId === run.id),
+      objectiveByTick: this.objectives.get(String(run.id)),
     });
     // Running = its tick moved within STALL_MS. Unfinished scenarios already
     // in the database on first load count as stopped until their tick moves
@@ -335,7 +359,7 @@ export class SpacetimeSyncSource implements SyncSource {
     const state = (s: Scenario) => {
       if (done(s)) return 'completed';
       if (this.halted.get(s.id) === newestId(s)) return 'stopped';
-      const tick = (s.runs.sync ?? s.runs.baseline)!.tick;
+      const tick = tickOf(s);
       const seen = this.progress.get(s.id);
       if (!seen) this.progress.set(s.id, { tick, at: firstLoad ? 0 : now });
       else if (seen.tick !== tick) this.progress.set(s.id, { tick, at: now });
@@ -359,13 +383,13 @@ export class SpacetimeSyncSource implements SyncSource {
     // between feeder steps, so an unfinished pair counts as running until its
     // tick stops moving (then stopped, and it can be rerun).
     const options: ScenarioOption[] = scenarios.map((s) => {
-      const run = (s.runs.sync ?? s.runs.baseline)!;
       return {
         id: s.id,
         label: s.id,
-        group: s.load,
+        group: s.run?.planner === 'llm' ? `${s.load} · LLM` : s.load,
         canRun: s.load !== 'External workers',
-        meta: `${state(s)} · tick ${run.tick}`,
+        run: s.run,
+        meta: `${state(s)} · tick ${tickOf(s)}`,
       };
     });
     const identity = conn.identity?.toHexString() ?? '';

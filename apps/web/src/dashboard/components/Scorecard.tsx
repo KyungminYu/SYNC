@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { BenchmarkSummary, Score } from '../../sync/contract';
+import type { ServiceSpeed } from '../model/service';
 
 /**
  * "How each run is scored" card (Figma Dashboard › Scorecard): one row per
@@ -48,7 +49,7 @@ const TERMS: Term[] = [
     label: 'Planning time',
     hint: 'lower is better · optimizer overhead',
     value: (s) => s.planningMs,
-    text: (s) => `${s.planningMs} ms total`,
+    text: (s) => `${planningSeconds(s.planningMs!)} total`,
     // Leave headroom so the longer bar does not fill the whole track.
     scale: (both) =>
       Math.max(0.1, ...both.map((s) => s.planningMs ?? 0)) * 1.15,
@@ -63,7 +64,33 @@ const TERMS: Term[] = [
   },
 ];
 
-/** "3 more orders", "12 fewer customers late", "1.6 ms more planning time". */
+/**
+ * Service speed rows (Figma Scorecard › "Not scored · service speed"): same
+ * bars as the terms, kept apart under their own label because objective (20)
+ * ignores how early orders finish.
+ */
+const SPEED: Array<{
+  label: string;
+  hint: string;
+  value: (s: ServiceSpeed) => number | null;
+}> = [
+  {
+    label: 'Average wait',
+    hint: 'arrival → served · not part of the score',
+    value: (s) => s.meanWait,
+  },
+];
+/** "86 s", "16.4 s": whole seconds stay whole. */
+const seconds = (v: number) =>
+  `${Number.isInteger(v) ? v : (Math.round(v * 10) / 10).toFixed(1)} s`;
+
+/** Planning time in seconds: "126.3 s", or "0.002 s" below one second. */
+const planningSeconds = (ms: number) => {
+  const s = ms / 1000;
+  return `${s >= 1 ? s.toFixed(1) : s.toFixed(3)} s`;
+};
+
+/** "3 more orders", "12 fewer customers late", "1.2 s more planning time". */
 function summary(baseline: Score, sync: Score) {
   const round = (v: number) => Math.round(v * 10) / 10;
   const diff = (n: number, more: string, fewer: string, unit: string) =>
@@ -75,11 +102,70 @@ function summary(baseline: Score, sync: Score) {
   const head =
     `SYNC finished ${diff(orders, 'more', 'fewer', 'orders')} in ${sync.T} s ` +
     `and left ${diff(late, 'more', 'fewer', 'customers late')}`;
+  const objective =
+    sync.objectiveValue !== undefined && baseline.objectiveValue !== undefined
+      ? ` Objective ${sync.objectiveValue.toFixed(3)} vs ${baseline.objectiveValue.toFixed(3)} (${sync.objectiveValue >= baseline.objectiveValue ? '+' : '−'}${Math.abs(sync.objectiveValue - baseline.objectiveValue).toFixed(3)}).`
+      : '';
   // Planning time joins the sentence only when both runs measured it.
   if (sync.planningMs === null || baseline.planningMs === null)
-    return `${head}.`;
+    return `${head}.${objective}`;
   const planning = sync.planningMs - baseline.planningMs;
-  return `${head}, for ${diff(planning, 'more', 'less', 'ms planning time')}.`;
+  return planning === 0
+    ? `${head}, for the same planning time.${objective}`
+    : `${head}, for ${planningSeconds(Math.abs(planning))} ${planning > 0 ? 'more' : 'less'} planning time.${objective}`;
+}
+
+/**
+ * The objective as one number per run, computed by the engine with fixed
+ * weights (completed value − weighted lateness, waiting, execution, staff
+ * and planning time). Higher is better; the bars start at the lower value
+ * so the gap is visible even when both are close.
+ */
+function ObjectiveTotal({
+  scores,
+}: {
+  scores: Partial<Record<Series, Score>>;
+}) {
+  const values = SERIES.map(({ key }) => scores[key]?.objectiveValue ?? null);
+  const known = values.filter((v): v is number => v !== null);
+  const lo = Math.min(0, ...known);
+  const span = Math.max(1e-9, Math.max(...known) - lo) * 1.15;
+  return (
+    <div className="terms objective-total" aria-label="Objective total">
+      <div className="term">
+        <span className="sign" aria-hidden>
+          =
+        </span>
+        <div className="name">
+          <strong>Objective</strong>
+          <small>higher is better · value − weighted penalties</small>
+        </div>
+        <div className="bars">
+          {SERIES.map(({ key, label }, i) => {
+            const v = values[i];
+            const text = v === null ? '—' : v.toFixed(3);
+            return (
+              <div className={`bar series-${key}`} key={key}>
+                <span
+                  className="track"
+                  role="img"
+                  aria-label={`${label}: ${text}`}
+                >
+                  <span
+                    className="fill"
+                    style={{
+                      width: `${v === null ? 0 : ((v - lo) / span) * 100}%`,
+                    }}
+                  />
+                </span>
+                <span className="value">{text}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Memoised: the scores change about once per second, not every frame. */
@@ -88,10 +174,13 @@ export const Scorecard = memo(function Scorecard({
   baseline,
   benchmark,
   seedLine = true,
+  service,
 }: {
   sync?: Score;
   baseline?: Score;
   benchmark?: BenchmarkSummary;
+  /** Service speed per run at the playhead (not scored); absent hides the rows. */
+  service?: Partial<Record<Series, ServiceSpeed>>;
   /** False when the source never sends a seed comparison (live): hides the pending line. */
   seedLine?: boolean;
 }) {
@@ -120,7 +209,9 @@ export const Scorecard = memo(function Scorecard({
 
       <div className="terms">
         {TERMS.map((term) => {
-          const measured = present.some((s) => term.value(s) !== null);
+          // No run yet: empty bars with "—" (Figma empty state), not "Not measured".
+          const measured =
+            !present.length || present.some((s) => term.value(s) !== null);
           return (
             <div className="term" key={term.label}>
               <span className="sign" aria-hidden>
@@ -164,13 +255,69 @@ export const Scorecard = memo(function Scorecard({
         })}
       </div>
 
+      {present.some((s) => s.objectiveValue !== undefined) && (
+        <ObjectiveTotal scores={scores} />
+      )}
+
+      {service && (
+        <div
+          className="terms not-scored"
+          aria-label="Service speed (not scored)"
+        >
+          <p className="group-label">Not scored · service speed</p>
+          {SPEED.map((row) => {
+            const values = SERIES.map(({ key }) => {
+              const s = service[key];
+              return s ? row.value(s) : null;
+            });
+            const scale = Math.max(1, ...values.map((v) => v ?? 0)) * 1.15;
+            return (
+              <div className="term" key={row.label}>
+                <span className="sign" aria-hidden>
+                  ·
+                </span>
+                <div className="name">
+                  <strong>{row.label}</strong>
+                  <small>{row.hint}</small>
+                </div>
+                <div className="bars">
+                  {SERIES.map(({ key, label }, i) => {
+                    const v = values[i];
+                    const text = v === null ? '—' : seconds(v);
+                    return (
+                      <div className={`bar series-${key}`} key={key}>
+                        <span
+                          className="track"
+                          role="img"
+                          aria-label={`${label}: ${text}`}
+                        >
+                          <span
+                            className="fill"
+                            style={{
+                              width: `${v === null ? 0 : (v / scale) * 100}%`,
+                            }}
+                          />
+                        </span>
+                        <span className="value">{text}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div className="summary">
         <p>
           {baseline && sync
             ? summary(baseline, sync)
-            : 'Single-run results; no baseline comparison yet.'}
+            : present.length
+              ? 'Single-run results; no baseline comparison yet.'
+              : 'No runs yet — scores fill in once a scenario starts.'}
         </p>
-        {(benchmark || seedLine) && (
+        {(benchmark || (seedLine && present.length > 0)) && (
           <span>
             {benchmark
               ? `${benchmark.seeds} seeds: ${benchmark.meanDiff >= 0 ? '+' : ''}${benchmark.meanDiff.toFixed(2)} orders (± ${benchmark.ci95.toFixed(2)})`
@@ -179,7 +326,7 @@ export const Scorecard = memo(function Scorecard({
         )}
       </div>
       <p className="formula">
-        Objective (20): maximize Σ v_i · 1{'{'}f_i ≤ T and success{'}'} −
+        Objective: maximize Σ v_i · 1{'{'}f_i ≤ T and success{'}'} −
         β·P_deadline − γ·C_exec − δ·C_coord
       </p>
     </section>

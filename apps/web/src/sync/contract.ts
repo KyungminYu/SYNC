@@ -53,6 +53,8 @@ export interface Zone {
 /** A staff member. Several agents may share a role (named "Cashier 1/2"). */
 export interface Agent {
   enabled?: boolean;
+  /** Never leaves its start spot (Baseline: staff keep their own slot). */
+  fixed?: boolean;
   id: string;
   name: string;
   role: Role;

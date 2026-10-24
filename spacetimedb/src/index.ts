@@ -10,6 +10,7 @@ export {
   set_run_status,
   enqueue_order,
   set_policy,
+  set_task_priorities,
   step_run,
   tick_run,
   close_arrivals,
