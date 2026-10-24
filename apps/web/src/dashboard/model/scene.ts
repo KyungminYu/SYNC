@@ -405,8 +405,8 @@ export function sceneAt(
         facing: 'down' as Facing,
       };
     });
-  // One person per slot: an idle person whose slot is taken waits aside.
-  clearSlots(agentViews, layout, lanes);
+  // One person per slot: an idle person whose slot is taken holds an empty one.
+  clearSlots(agentViews, layout);
 
   const jobs = new Map(data.jobs.map((j) => [j.id, j]));
   const counterAt = (id?: string): Point => ({
@@ -647,33 +647,26 @@ export function sceneAt(
   };
 }
 
-/** Gap between people waiting at the staff spot (grid units). */
-export const STAFF_SPOT_GAP = 0.75;
-
 /**
- * One person per slot (Figma "Staff rules v2"): when people stand on the same
- * spot (a helper working a colleague's slot), the one working keeps it and
- * the others walk to the staff spot in the aisle — between the bar row's last
- * slot and the first pickup — away from every slot. Fixed (Baseline) staff
- * never move. Mutates the views in place; positions only.
+ * One person per slot, no breaks (Figma "Staff rules v4"): when people stand
+ * on the same spot (a helper working a colleague's slot), the one working
+ * keeps it and each other person holds the nearest empty slot — a free slot
+ * of their own type first, else the closest free one in the same row (a
+ * straight step along the counter; a row always has one free). Fixed
+ * (Baseline) staff never move. Mutates the views in place; positions only.
  */
-export function clearSlots(views: AgentView[], layout: Layout, lanes: Lanes) {
-  const bars = layout.resources.filter((r) => r.type === 'bar').map((r) => r.x);
-  const pickups = layout.resources
-    .filter((r) => r.type === 'pickup')
-    .map((r) => r.x);
-  const spotX =
-    bars.length && pickups.length
-      ? (Math.max(...bars) + Math.min(...pickups)) / 2
-      : (lanes.headX + lanes.exitX) / 2;
+export function clearSlots(views: AgentView[], layout: Layout) {
   const fixed = new Set(layout.agents.filter((a) => a.fixed).map((a) => a.id));
+  const own = new Map(layout.agents.map((a) => [a.id, a.primaryTypes]));
+  const stand = (r: Layout['resources'][number]) => ({
+    x: r.standX ?? r.x,
+    y: r.standY ?? r.y,
+  });
   // Same spot = same position to 1/100 of a tile (walkers mid-route never match).
+  const key = (p: { x: number; y: number }) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`;
   const spots = new Map<string, AgentView[]>();
-  for (const v of views) {
-    const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
-    spots.set(key, [...(spots.get(key) ?? []), v]);
-  }
-  let waiting = 0;
+  for (const v of views) spots.set(key(v), [...(spots.get(key(v)) ?? []), v]);
+  const taken = new Set(spots.keys());
   for (const group of spots.values()) {
     if (group.length < 2) continue;
     // Working first, then fixed staff (never move), then layout order.
@@ -682,11 +675,22 @@ export function clearSlots(views: AgentView[], layout: Layout, lanes: Lanes) {
     const ordered = [...group].sort((a, b) => rank(b) - rank(a));
     for (const v of ordered.slice(1)) {
       if (fixed.has(v.id)) continue;
-      // Side by side at the staff spot: centre, then right, left, …
-      const k = waiting++;
-      const offset = Math.ceil(k / 2) * (k % 2 ? 1 : -1) * STAFF_SPOT_GAP;
-      v.x = spotX + offset;
-      v.y = lanes.staffAisleY;
+      const free = layout.resources
+        .filter((r) => !taken.has(key(stand(r))))
+        // Same row only, so the step is never diagonal.
+        .filter((r) => Math.abs(stand(r).y - v.y) < 0.01)
+        .sort(
+          (a, b) =>
+            Number(!own.get(v.id)?.includes(a.type)) -
+              Number(!own.get(v.id)?.includes(b.type)) ||
+            Math.hypot(stand(a).x - v.x, stand(a).y - v.y) -
+              Math.hypot(stand(b).x - v.x, stand(b).y - v.y),
+        );
+      if (!free.length) continue;
+      const to = stand(free[0]);
+      taken.add(key(to));
+      v.x = to.x;
+      v.y = to.y;
     }
   }
 }

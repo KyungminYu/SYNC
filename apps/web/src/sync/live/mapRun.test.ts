@@ -318,7 +318,7 @@ describe('one person per role and per slot', () => {
     expect(sceneAt(data, 16.5).agents.find((a) => a.id === 'cashier')?.state).toBe('idle');
   });
 
-  it('sends an idle person whose slot is taken to the staff spot (SYNC)', () => {
+  it('moves an idle person whose slot is taken to the nearest empty slot (SYNC)', () => {
     // Server 1 collects a tray at the sink, where the idle cleaner stands.
     const helped = normalizeRun(
       mapRun(
@@ -330,8 +330,8 @@ describe('one person per role and per slot', () => {
     const server = at.find((a) => a.id === 'server')!;
     const cleaner = at.find((a) => a.id === 'cleaner')!;
     expect(server).toMatchObject({ state: 'working', helping: true, x: 14.5, y: 2.5 });
-    // Cleaner waits in the aisle between Bar 2 (7.5) and Pickup 1 (11.5).
-    expect(cleaner).toMatchObject({ state: 'idle', x: 9.5 });
+    // No breaks: the cleaner holds the closest free slot in its row, Bar 2 (7.5, 2.5).
+    expect(cleaner).toMatchObject({ state: 'idle', x: 7.5, y: 2.5 });
     expect(sceneAt(helped, 38).agents.find((a) => a.id === 'cleaner')).toMatchObject({
       x: 14.5,
       y: 2.5,
