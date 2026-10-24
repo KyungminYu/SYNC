@@ -297,15 +297,18 @@ describe('order line timing, folding and waiting capacity', () => {
     }
   });
 
-  it('widens to 6 columns above 10 waiting, then adds rows and a taller board', () => {
+  it('adds waiting rows (never a 6th column) above 10 and grows the board downward', () => {
     const ten = buildLanes(run.layout, 10);
     const twelve = buildLanes(run.layout, 12);
     const fifteen = buildLanes(run.layout, 15);
     expect(ten.waitingSpots).toHaveLength(10);
-    expect(twelve.waitingSpots).toHaveLength(12);
-    expect(twelve.wallY).toBeCloseTo(ten.wallY);
-    expect(fifteen.waitingSpots.length).toBeGreaterThanOrEqual(15);
-    expect(fifteen.wallY).toBeGreaterThan(ten.wallY);
+    // 11–15 waiting: a third row of 5; the front wall moves down one row.
+    expect(twelve.waitingSpots).toHaveLength(15);
+    expect(fifteen.waitingSpots).toHaveLength(15);
+    expect(twelve.wallY).toBeCloseTo(ten.wallY + 1);
+    // Columns never reach the exit lane.
+    const maxX = Math.max(...fifteen.waitingSpots.map((s) => s.x));
+    expect(maxX).toBeLessThan(fifteen.exitX - 0.5);
     // Every spot but the front row opens onto an aisle.
     const rows = [...new Set(fifteen.waitingSpots.map((s) => s.y))].sort(
       (a, b) => a - b,

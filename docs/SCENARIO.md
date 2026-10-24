@@ -40,7 +40,8 @@ comparison.
   take longer). Customers take the nearest free waiting spot and stay there; whoever's
   drinks are ready walks to pickup. Every spot touches an aisle, so nobody pushes past
   anyone; a customer waits a moment if someone is already walking in the aisle. More than
-  10 waiting adds a sixth column (12); more than 12 adds rows and makes the board taller.
+  10 waiting adds another row of 5 per extra 5 people and makes the board taller; columns
+  never reach the exit lane.
 - There is no counter queue and no seating: an order ends when the server hands the
   drink to the customer.
 
