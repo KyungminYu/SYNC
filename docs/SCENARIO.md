@@ -135,5 +135,5 @@ Example menu (sample values only):
 
 ## 9. Related
 
-- UI contract: `contracts/INTERFACE.md` (in the UI workspace; Job/Task shapes there follow §4–§5).
-- Dashboard (mock-backed): `apps/web/dashboard.html`, code under `apps/web/src/sync` and `apps/web/src/dashboard`.
+- UI contract: `design/INTERFACE.md` (in the UI workspace, outside this repo; Job/Task shapes there follow §4–§5).
+- Dashboard (mock-backed): served at `/` (`apps/web/index.html`), code under `apps/web/src/sync` and `apps/web/src/dashboard`.
