@@ -561,6 +561,14 @@ input:focus-visible {
   border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
 }
+/* The objective as one number per run, under the scored terms. */
+.scorecard .objective-total {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+}
+.scorecard .objective-total strong {
+  font-weight: 600;
+}
 .scorecard .group-label {
   margin: 0;
   font-size: 11px;

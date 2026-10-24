@@ -164,6 +164,8 @@ export class SpacetimeSyncSource implements SyncSource {
    * so older ones are remembered here to keep the full history on screen.
    */
   private decisions = new Map<string, Map<string, DecisionRow>>();
+  /** Engine objective (net reward) per run and tick, as seen so far. */
+  private objectives = new Map<string, Map<number, number>>();
 
   constructor(private readonly mode: SpacetimeMode = 'live') {
     this.delivery = mode === 'stored' ? 'replay' : 'stream';
@@ -320,10 +322,18 @@ export class SpacetimeSyncSource implements SyncSource {
     const visible = new Set([...db.uiRuns.iter()].map((r) => String(r.id)));
     for (const id of this.decisions.keys())
       if (!visible.has(id)) this.decisions.delete(id);
+    for (const id of this.objectives.keys())
+      if (!visible.has(id)) this.objectives.delete(id);
     const orders = [...db.uiOrders.iter()];
     const tasks = [...db.uiTasks.iter()];
     const workers = [...db.uiWorkers.iter()];
     const metrics = [...db.uiMetrics.iter()];
+    for (const m of metrics) {
+      const key = String(m.runId);
+      const seen = this.objectives.get(key) ?? new Map<number, number>();
+      seen.set(m.tick, m.netReward);
+      this.objectives.set(key, seen);
+    }
     for (const d of db.uiDecisions.iter()) {
       const key = String(d.runId);
       const seen = this.decisions.get(key) ?? new Map<string, DecisionRow>();
@@ -338,6 +348,7 @@ export class SpacetimeSyncSource implements SyncSource {
       workers: workers.filter((w) => w.runId === run.id),
       decisions: [...(this.decisions.get(String(run.id))?.values() ?? [])],
       metrics: metrics.find((m) => m.runId === run.id),
+      objectiveByTick: this.objectives.get(String(run.id)),
     });
     // Running = its tick moved within STALL_MS. Unfinished scenarios already
     // in the database on first load count as stopped until their tick moves

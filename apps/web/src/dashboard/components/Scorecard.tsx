@@ -107,13 +107,70 @@ function summary(baseline: Score, sync: Score) {
   const head =
     `SYNC finished ${diff(orders, 'more', 'fewer', 'orders')} in ${sync.T} s ` +
     `and left ${diff(late, 'more', 'fewer', 'customers late')}`;
+  const objective =
+    sync.objectiveValue !== undefined && baseline.objectiveValue !== undefined
+      ? ` Objective ${sync.objectiveValue.toFixed(3)} vs ${baseline.objectiveValue.toFixed(3)} (${sync.objectiveValue >= baseline.objectiveValue ? '+' : '−'}${Math.abs(sync.objectiveValue - baseline.objectiveValue).toFixed(3)}).`
+      : '';
   // Planning time joins the sentence only when both runs measured it.
   if (sync.planningMs === null || baseline.planningMs === null)
-    return `${head}.`;
+    return `${head}.${objective}`;
   const planning = sync.planningMs - baseline.planningMs;
   return planning === 0
-    ? `${head}, for the same planning time.`
-    : `${head}, for ${planningSeconds(Math.abs(planning))} ${planning > 0 ? 'more' : 'less'} planning time.`;
+    ? `${head}, for the same planning time.${objective}`
+    : `${head}, for ${planningSeconds(Math.abs(planning))} ${planning > 0 ? 'more' : 'less'} planning time.${objective}`;
+}
+
+/**
+ * The objective as one number per run, computed by the engine with fixed
+ * weights (completed value − weighted lateness, waiting, execution, staff
+ * and planning time). Higher is better; the bars start at the lower value
+ * so the gap is visible even when both are close.
+ */
+function ObjectiveTotal({
+  scores,
+}: {
+  scores: Partial<Record<Series, Score>>;
+}) {
+  const values = SERIES.map(({ key }) => scores[key]?.objectiveValue ?? null);
+  const known = values.filter((v): v is number => v !== null);
+  const lo = Math.min(0, ...known);
+  const span = Math.max(1e-9, Math.max(...known) - lo) * 1.15;
+  return (
+    <div className="terms objective-total" aria-label="Objective total">
+      <div className="term">
+        <span className="sign" aria-hidden>
+          =
+        </span>
+        <div className="name">
+          <strong>Objective</strong>
+          <small>higher is better · value − weighted penalties</small>
+        </div>
+        <div className="bars">
+          {SERIES.map(({ key, label }, i) => {
+            const v = values[i];
+            const text = v === null ? '—' : v.toFixed(3);
+            return (
+              <div className={`bar series-${key}`} key={key}>
+                <span
+                  className="track"
+                  role="img"
+                  aria-label={`${label}: ${text}`}
+                >
+                  <span
+                    className="fill"
+                    style={{
+                      width: `${v === null ? 0 : ((v - lo) / span) * 100}%`,
+                    }}
+                  />
+                </span>
+                <span className="value">{text}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Memoised: the scores change about once per second, not every frame. */
@@ -203,16 +260,22 @@ export const Scorecard = memo(function Scorecard({
         })}
       </div>
 
+      {present.some((s) => s.objectiveValue !== undefined) && (
+        <ObjectiveTotal scores={scores} />
+      )}
+
       {service && (
-        <div className="terms not-scored" aria-label="Service speed (not scored)">
+        <div
+          className="terms not-scored"
+          aria-label="Service speed (not scored)"
+        >
           <p className="group-label">Not scored · service speed</p>
           {SPEED.map((row) => {
             const values = SERIES.map(({ key }) => {
               const s = service[key];
               return s ? row.value(s) : null;
             });
-            const scale =
-              Math.max(1, ...values.map((v) => v ?? 0)) * 1.15;
+            const scale = Math.max(1, ...values.map((v) => v ?? 0)) * 1.15;
             return (
               <div className="term" key={row.label}>
                 <span className="sign" aria-hidden>
@@ -235,7 +298,9 @@ export const Scorecard = memo(function Scorecard({
                         >
                           <span
                             className="fill"
-                            style={{ width: `${v === null ? 0 : (v / scale) * 100}%` }}
+                            style={{
+                              width: `${v === null ? 0 : (v / scale) * 100}%`,
+                            }}
                           />
                         </span>
                         <span className="value">{text}</span>
@@ -266,7 +331,7 @@ export const Scorecard = memo(function Scorecard({
         )}
       </div>
       <p className="formula">
-        Objective (20): maximize Σ v_i · 1{'{'}f_i ≤ T and success{'}'} −
+        Objective: maximize Σ v_i · 1{'{'}f_i ≤ T and success{'}'} −
         β·P_deadline − γ·C_exec − δ·C_coord
       </p>
     </section>

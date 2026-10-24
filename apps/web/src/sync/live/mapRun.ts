@@ -101,6 +101,11 @@ export interface RunRows {
   decisions: DecisionRow[];
   metrics?: MetricsRow;
   edges?: { fromTaskId: bigint; toTaskId: bigint }[];
+  /**
+   * The engine's objective (net reward) seen at each tick so far. ui_metrics
+   * only holds the current value, so the source remembers earlier ones.
+   */
+  objectiveByTick?: Map<number, number>;
 }
 
 /** Horizon T of objective (20) in ticks (1 tick = 1 scenario second). */
@@ -604,6 +609,15 @@ export function mapRun(
       ? null
       : Number(rows.metrics.modeledSpentMicrousd) / 1000000;
   data.score.objectiveValue = rows.metrics?.netReward;
+  // Objective at each playhead second: the latest value seen at or before it.
+  let objective: number | undefined;
+  for (const score of data.scoreTimeline) {
+    objective = rows.objectiveByTick?.get(score.t) ?? objective;
+    score.objectiveValue = objective;
+  }
+  if (data.scoreTimeline.length)
+    data.scoreTimeline[data.scoreTimeline.length - 1].objectiveValue =
+      data.score.objectiveValue;
   if (data.scoreTimeline.length)
     data.scoreTimeline[data.scoreTimeline.length - 1].execCost =
       data.score.execCost;
