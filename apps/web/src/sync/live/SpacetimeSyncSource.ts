@@ -114,6 +114,12 @@ const done = (s: Scenario) =>
     ? s.runs.sync?.status === 'completed'
     : s.runs.baseline?.status === 'completed' &&
       s.runs.sync?.status === 'completed';
+/**
+ * Scenario tick: the furthest of its runs. One run can finish first (e.g.
+ * SYNC), while the other still moves; the pair is running until both stop.
+ */
+const tickOf = (s: Scenario) =>
+  Math.max(s.runs.baseline?.tick ?? 0, s.runs.sync?.tick ?? 0);
 /** Highest run id in a scenario: the most recently created one. */
 const newestId = (s: Scenario) =>
   [s.runs.baseline?.id ?? 0n, s.runs.sync?.id ?? 0n].reduce((a, b) =>
@@ -335,7 +341,7 @@ export class SpacetimeSyncSource implements SyncSource {
     const state = (s: Scenario) => {
       if (done(s)) return 'completed';
       if (this.halted.get(s.id) === newestId(s)) return 'stopped';
-      const tick = (s.runs.sync ?? s.runs.baseline)!.tick;
+      const tick = tickOf(s);
       const seen = this.progress.get(s.id);
       if (!seen) this.progress.set(s.id, { tick, at: firstLoad ? 0 : now });
       else if (seen.tick !== tick) this.progress.set(s.id, { tick, at: now });
@@ -359,13 +365,12 @@ export class SpacetimeSyncSource implements SyncSource {
     // between feeder steps, so an unfinished pair counts as running until its
     // tick stops moving (then stopped, and it can be rerun).
     const options: ScenarioOption[] = scenarios.map((s) => {
-      const run = (s.runs.sync ?? s.runs.baseline)!;
       return {
         id: s.id,
         label: s.id,
         group: s.load,
         canRun: s.load !== 'External workers',
-        meta: `${state(s)} · tick ${run.tick}`,
+        meta: `${state(s)} · tick ${tickOf(s)}`,
       };
     });
     const identity = conn.identity?.toHexString() ?? '';
