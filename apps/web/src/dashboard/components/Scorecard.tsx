@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { BenchmarkSummary, Score } from '../../sync/contract';
+import type { ServiceSpeed } from '../model/service';
 
 /**
  * "How each run is scored" card (Figma Dashboard › Scorecard): one row per
@@ -63,6 +64,31 @@ const TERMS: Term[] = [
   },
 ];
 
+/**
+ * Service speed rows (Figma Scorecard › "Not scored · service speed"): same
+ * bars as the terms, kept apart under their own label because objective (20)
+ * ignores how early orders finish.
+ */
+const SPEED: Array<{
+  label: string;
+  hint: string;
+  value: (s: ServiceSpeed) => number | null;
+}> = [
+  {
+    label: 'Last order done',
+    hint: 'earlier is better · not part of the score',
+    value: (s) => s.lastDone,
+  },
+  {
+    label: 'Average wait',
+    hint: 'arrival → served · not part of the score',
+    value: (s) => s.meanWait,
+  },
+];
+/** "86 s", "16.4 s": whole seconds stay whole. */
+const seconds = (v: number) =>
+  `${Number.isInteger(v) ? v : (Math.round(v * 10) / 10).toFixed(1)} s`;
+
 /** "3 more orders", "12 fewer customers late", "1.6 ms more planning time". */
 function summary(baseline: Score, sync: Score) {
   const round = (v: number) => Math.round(v * 10) / 10;
@@ -88,10 +114,13 @@ export const Scorecard = memo(function Scorecard({
   baseline,
   benchmark,
   seedLine = true,
+  service,
 }: {
   sync?: Score;
   baseline?: Score;
   benchmark?: BenchmarkSummary;
+  /** Service speed per run at the playhead (not scored); absent hides the rows. */
+  service?: Partial<Record<Series, ServiceSpeed>>;
   /** False when the source never sends a seed comparison (live): hides the pending line. */
   seedLine?: boolean;
 }) {
@@ -165,6 +194,52 @@ export const Scorecard = memo(function Scorecard({
           );
         })}
       </div>
+
+      {service && (
+        <div className="terms not-scored" aria-label="Service speed (not scored)">
+          <p className="group-label">Not scored · service speed</p>
+          {SPEED.map((row) => {
+            const values = SERIES.map(({ key }) => {
+              const s = service[key];
+              return s ? row.value(s) : null;
+            });
+            const scale =
+              Math.max(1, ...values.map((v) => v ?? 0)) * 1.15;
+            return (
+              <div className="term" key={row.label}>
+                <span className="sign" aria-hidden>
+                  ·
+                </span>
+                <div className="name">
+                  <strong>{row.label}</strong>
+                  <small>{row.hint}</small>
+                </div>
+                <div className="bars">
+                  {SERIES.map(({ key, label }, i) => {
+                    const v = values[i];
+                    const text = v === null ? '—' : seconds(v);
+                    return (
+                      <div className={`bar series-${key}`} key={key}>
+                        <span
+                          className="track"
+                          role="img"
+                          aria-label={`${label}: ${text}`}
+                        >
+                          <span
+                            className="fill"
+                            style={{ width: `${v === null ? 0 : (v / scale) * 100}%` }}
+                          />
+                        </span>
+                        <span className="value">{text}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="summary">
         <p>

@@ -18,6 +18,7 @@ import {
 import type { DecisionFilter } from './model/decisions';
 import { buildLanes } from './model/lanes';
 import { scoreAt } from './model/scoreAt';
+import { serviceAt } from './model/service';
 import { peakLine, peakWaiting, sceneAt } from './model/scene';
 import { usePlayback } from './usePlayback';
 import { useSyncSnapshot } from './useSyncSnapshot';
@@ -136,6 +137,14 @@ export function Dashboard({
   const baselineScore = useMemo(
     () => baseline && scoreAt(baseline, second),
     [baseline, second],
+  );
+  // Service speed (not scored), also once per simulated second.
+  const service = useMemo(
+    () => ({
+      baseline: baseline && serviceAt(baseline, second),
+      sync: sync && serviceAt(sync, second),
+    }),
+    [baseline, sync, second],
   );
   const panelRun = runs[policy];
   // The decision list only changes when the next decision is reached, so it
@@ -310,6 +319,7 @@ export function Dashboard({
               baseline={baselineScore}
               benchmark={benchmark}
               seedLine={source.origin === 'sample'}
+              service={service}
             />
           </div>
           <DecisionsPanel
