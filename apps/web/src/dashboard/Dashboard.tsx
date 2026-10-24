@@ -83,6 +83,14 @@ export function Dashboard({
   const [policy, setPolicy] = useState<Policy>('sync');
   const [filter, setFilter] = useState<DecisionFilter>('all');
   const [selected, setSelected] = useState<Decision>();
+  // Stop the runner, then tell the source at once: its runs stay unfinished
+  // in the database, so it would otherwise notice only when ticks stop moving.
+  const stopRunner =
+    runner?.stop &&
+    (async () => {
+      await runner.stop!();
+      source.runnerStopped?.();
+    });
 
   // Another scenario: forget the selected decision. A replay starts from 0;
   // in Live a finished scenario opens on its final tick, and a running one
@@ -208,7 +216,7 @@ export function Dashboard({
                   await runner.start(id, viewer);
                 })
               }
-              onStop={runner?.stop && (() => runner.stop!())}
+              onStop={stopRunner}
               footnote={
                 runner
                   ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); scenarios differ by customers and drinks per order.'
@@ -226,7 +234,7 @@ export function Dashboard({
         onStop={
           scenarios?.find((s) => s.id === scenarioId)?.canRun === false
             ? undefined
-            : runner?.stop && (() => void runner.stop!())
+            : stopRunner && (() => void stopRunner())
         }
         mode={mode}
         onMode={onMode}

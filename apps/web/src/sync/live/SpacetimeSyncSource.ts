@@ -135,6 +135,8 @@ export class SpacetimeSyncSource implements SyncSource {
   private known?: Map<string, bigint>;
   /** Last tick seen per scenario and when it last moved (stall detection). */
   private progress = new Map<string, { tick: number; at: number }>();
+  /** Newest run id per scenario the runner stopped; a rerun gets newer ids. */
+  private halted = new Map<string, bigint>();
   /** True once the first subscribed rows were read (later scenarios are new). */
   private loaded = false;
   /** Live: periodic re-check so a stalled scenario turns 'stopped' without new rows. */
@@ -254,6 +256,13 @@ export class SpacetimeSyncSource implements SyncSource {
     this.rebuild();
   }
 
+  runnerStopped() {
+    const runs = this.conn ? ([...this.conn.db.uiRuns.iter()] as RunRow[]) : [];
+    for (const s of scenariosOf(runs, this.mode === 'stored'))
+      if (!done(s)) this.halted.set(s.id, newestId(s));
+    this.rebuild();
+  }
+
   private set(next: SyncSnapshot) {
     this.snapshot = next;
     for (const l of this.listeners) l();
@@ -320,6 +329,7 @@ export class SpacetimeSyncSource implements SyncSource {
     const firstLoad = !this.loaded;
     const state = (s: Scenario) => {
       if (done(s)) return 'completed';
+      if (this.halted.get(s.id) === newestId(s)) return 'stopped';
       const tick = (s.runs.sync ?? s.runs.baseline)!.tick;
       const seen = this.progress.get(s.id);
       if (!seen) this.progress.set(s.id, { tick, at: firstLoad ? 0 : now });
