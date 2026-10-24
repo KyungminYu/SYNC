@@ -99,13 +99,12 @@ order_time = order_base + order_per_item · items + Σ order_extra(item.complexi
 make_time(drink) = make_base(drink) · complexity_factor(drink.complexity)
 ```
 
-Example menu (sample values only):
+Menu (same as the SYNC engine recipes; more drinks may be added later):
 
-| Item                            | Complexity | Notes                                 |
-| ------------------------------- | ---------- | ------------------------------------- |
-| Tea, Americano                  | simple     | short to order, short to make         |
-| Latte, Flat white, Cold brew    | medium     |                                       |
-| Mocha, custom / seasonal drinks | complex    | long to order (options), long to make |
+| Item         | Complexity | Engine recipe  | Notes                          |
+| ------------ | ---------- | -------------- | ------------------------------ |
+| Black coffee | simple     | `black_coffee` | short to order, short to make  |
+| Latte        | medium     | `latte`        | coffee + steamed milk (longer) |
 
 ## 6. Decisions and objective
 
@@ -131,6 +130,8 @@ Example menu (sample values only):
 1. One make task per drink (parallel bars) or one per order? This doc assumes per drink.
 2. May the cleaner help other roles, and may others clean?
 3. Complexity coefficients, item counts per order, arrival pattern and deadline rule.
+   (The mock's sample arrivals: in the `morning` scenario the first half of customers
+   arrive every `rushGap` seconds, default 14, the rest every 17 s, plus 0–4 s noise.)
 4. Helping slowdown factor per role pair.
 5. Weights β, γ, δ and whether `planningMs` is used as C_coord.
 
