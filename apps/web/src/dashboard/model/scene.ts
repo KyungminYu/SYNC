@@ -622,7 +622,13 @@ export function sceneAt(
       p = walkAt(route, aisleStart.get(id) ?? c.handoffStart!, t);
     } else {
       // Served: counter lane to the exit lane, then out through the door.
-      const pick = counterAt(c.pickup);
+      // Leave from the pickup counter, or, when never called to one (the
+      // order completed without a hand-off at a counter), from where they
+      // waited; never from the register area.
+      const pick =
+        c.pickup !== undefined || c.orderEnd === undefined
+          ? counterAt(c.pickup)
+          : walkAt(waitingRoute(c, spot), c.orderEnd, c.completed!);
       const route = [
         pick,
         { x: pick.x, y: lanes.counterY },
