@@ -109,6 +109,8 @@ export interface Scene {
   lanes: Lanes;
   /** True while the order line is long enough to use the bottom row (rope shown). */
   queueFolded: boolean;
+  /** People in the order line now (decides which ropes are shown). */
+  lineLength: number;
   slots: SlotView[];
   agents: AgentView[];
   customers: CustomerView[];
@@ -146,13 +148,14 @@ function walkAt(route: Point[], start: number, t: number) {
 export function sceneAt(
   data: RunData,
   t: number,
-  lanes: Lanes = buildLanes(data.layout, peakWaiting(data)),
+  lanes: Lanes = buildLanes(data.layout, peakWaiting(data), peakLine(data)),
   /** Internal: false when computing the previous instant for facing. */
   withFacing = true,
 ): Scene {
   const { layout } = data;
   const resources = new Map(layout.resources.map((r) => [r.id, r]));
   const taskType = new Map(data.tasks.map((task) => [task.id, task.type]));
+  const registerTasks = registerCounts(data);
   // Known finish times, for progress bars when task.started carries no duration.
   const finishedAt = new Map<string, number>();
   for (const e of data.events)
@@ -181,9 +184,16 @@ export function sceneAt(
     string,
     {
       arrived: number;
+      /**
+       * When they step through the door. Customers who arrive together come
+       * in one after another (one queue spacing apart), never as a clump.
+       */
+      entered?: number;
       stage: CustomerStage;
       orderStart?: number;
       register?: string;
+      /** Register tasks finished so far (a live cart has one pair per drink). */
+      registersDone?: number;
       orderEnd?: number;
       spot?: number;
       handoffStart?: number;
@@ -232,13 +242,21 @@ export function sceneAt(
             task: e.taskId,
           });
         if (slot) slot.busy = e;
-        if (customer && type === 'register')
+        // Only the first register task moves the customer; later ones (more
+        // drinks, payment) keep them at the register they walked to.
+        if (customer && type === 'register' && customer.stage === 'line')
           Object.assign(customer, {
             stage: 'ordering',
             orderStart: e.t,
             register: e.resourceId,
           });
-        if (customer && type === 'pickup') {
+        // Only the first hand-off task calls the customer to pickup.
+        if (
+          customer &&
+          type === 'pickup' &&
+          customer.stage !== 'ready' &&
+          customer.stage !== 'leaving'
+        ) {
           // Called: leave the waiting spot (free it for the next arrival).
           if (customer.spot !== undefined)
             spotHolder[customer.spot] = undefined;
@@ -253,8 +271,15 @@ export function sceneAt(
       case 'task.finished':
         if (agent) Object.assign(agent, { working: false, task: undefined });
         if (slot) slot.busy = undefined;
-        if (customer && type === 'register') {
-          // Ordered: take the nearest free waiting spot and keep it.
+        if (customer && type === 'register')
+          customer.registersDone = (customer.registersDone ?? 0) + 1;
+        if (
+          customer &&
+          type === 'register' &&
+          customer.stage === 'ordering' &&
+          customer.registersDone! >= (registerTasks.get(jobOf(e)!) ?? 1)
+        ) {
+          // Ordered (last register task done): take the nearest free waiting spot and keep it.
           const free = spotHolder.findIndex((h) => h === undefined);
           if (free >= 0) spotHolder[free] = jobOf(e);
           Object.assign(customer, {
@@ -357,6 +382,13 @@ export function sceneAt(
   const order = [...customers.entries()].sort(
     (a, b) => a[1].arrived - b[1].arrived,
   );
+  // Single file through the door: each customer enters at least one step
+  // after the one before (a group that arrives at once files in).
+  let lastEntered = -Infinity;
+  for (const [, c] of order) {
+    c.entered = Math.max(c.arrived, lastEntered + stepTime);
+    lastEntered = c.entered;
+  }
 
   /**
    * Place in line (0 = head) at time tau, theme-park shuffle: the place taken
@@ -367,12 +399,12 @@ export function sceneAt(
     const c = order[index][1];
     const ahead = order.slice(0, index).map(([, d]) => d);
     let place = ahead.filter(
-      (d) => (d.orderStart ?? Infinity) > c.arrived,
+      (d) => (d.orderStart ?? Infinity) > c.entered!,
     ).length;
     const joined = place;
     for (const d of ahead) {
       const left = d.orderStart ?? Infinity;
-      if (left > c.arrived && left <= tau)
+      if (left > c.entered! && left <= tau)
         place -= Math.min(1, (tau - left) / stepTime);
     }
     return { place, joined };
@@ -399,7 +431,7 @@ export function sceneAt(
           ]
         : [lanes.door, ...subPath(path, queueLen, dJoin)];
     const entryLen = pathLength(entry);
-    const walked = (tau - c.arrived) * CUSTOMER_SPEED;
+    const walked = Math.max(0, tau - c.entered!) * CUSTOMER_SPEED;
     if (walked < entryLen)
       return {
         ...pointAt(entry, walked),
@@ -407,7 +439,7 @@ export function sceneAt(
         rest: subPath(entry, walked, entryLen),
         dJoin,
       };
-    const reached = c.arrived + entryLen / CUSTOMER_SPEED;
+    const reached = c.entered! + entryLen / CUSTOMER_SPEED;
     const target = Math.min(queueLen, place * lanes.spacing);
     const d = Math.max(target, dJoin - (tau - reached) * CUSTOMER_SPEED);
     return { ...pointAt(path, d), d, rest: [] as Point[], dJoin };
@@ -454,6 +486,14 @@ export function sceneAt(
     );
   }
 
+  // Customers ordering now, per register, in the order they stepped up.
+  const orderingAt = new Map<string, string[]>();
+  for (const [id, c] of [...customers.entries()].sort(
+    (a, b) => (a[1].orderStart ?? 0) - (b[1].orderStart ?? 0),
+  ))
+    if (c.stage === 'ordering' && c.register)
+      orderingAt.set(c.register, [...(orderingAt.get(c.register) ?? []), id]);
+
   let done = 0,
     late = 0,
     inLine = 0;
@@ -468,6 +508,9 @@ export function sceneAt(
     if (isLate) late++;
     const spot = c.spot !== undefined ? lanes.waitingSpots[c.spot] : undefined;
     let p: { x: number; y: number; walking: boolean };
+    // Still outside, waiting for the one ahead to step in: not drawn
+    // (customers never stand stacked on the doorway).
+    if (c.stage === 'line' && t < c.entered!) return;
     if (c.stage === 'line') {
       // Standing in (or walking into) the line.
       inLine++;
@@ -481,7 +524,12 @@ export function sceneAt(
     } else if (c.stage === 'ordering') {
       // From the place in line forward to the head, up to the counter lane, to the register.
       const at = linePosition(index, c.orderStart!);
-      const reg = counterAt(c.register);
+      // Several customers ordering at one register (the cashier alternates
+      // between their drinks) stand side by side: 0, −0.8, +0.8, −1.6 …
+      const rank = (orderingAt.get(c.register ?? '') ?? []).indexOf(id);
+      const shift = rank <= 0 ? 0 : (rank % 2 ? -1 : 1) * Math.ceil(rank / 2) * 0.8;
+      const base = counterAt(c.register);
+      const reg = { ...base, x: base.x + shift };
       const toHead =
         at.d !== undefined
           ? subPath(path, at.d, 0)
@@ -548,6 +596,7 @@ export function sceneAt(
     zones: layout.zones,
     lanes,
     queueFolded: inLine > lanes.foldAfter,
+    lineLength: inLine,
     slots: slotViews,
     agents: agentViews,
     customers: customerViews,
@@ -561,14 +610,52 @@ export function sceneAt(
  * (order taken, hand off not started). Sizes the waiting area: >10 adds a
  * sixth column, >12 adds rows and a taller board.
  */
+/** Most people in the order line at once in the delivered rows (sizes the queue rows). */
+export function peakLine(data: RunData) {
+  // In line from arrival until the first register task starts.
+  const type = new Map(data.tasks.map((task) => [task.id, task.type]));
+  const changes: Array<[number, number]> = [];
+  const started = new Set<string>();
+  for (const e of data.events) {
+    if (e.type === 'job.arrived' && e.jobId) changes.push([e.t, 1]);
+    const job = e.taskId?.split('.')[0];
+    if (e.type === 'task.started' && job && type.get(e.taskId!) === 'register' && !started.has(job)) {
+      started.add(job);
+      changes.push([e.t, -1]);
+    }
+  }
+  let now = 0,
+    peak = 0;
+  for (const [, d] of changes.sort((a, b) => a[0] - b[0] || a[1] - b[1])) {
+    now += d;
+    peak = Math.max(peak, now);
+  }
+  return peak;
+}
+
 export function peakWaiting(data: RunData) {
   let now = 0,
     peak = 0;
-  const type = new Map(data.tasks.map((task) => [task.id, task.type]));
+  const task = new Map(data.tasks.map((t) => [t.id, t]));
+  const registerTasks = registerCounts(data);
+  // Per customer: register tasks finished, and whether they are waiting / called.
+  const done = new Map<string, number>();
+  const state = new Map<string, 'waiting' | 'called'>();
   for (const e of data.events) {
-    const kind = e.taskId ? type.get(e.taskId) : undefined;
-    if (e.type === 'task.finished' && kind === 'register') now++;
-    if (e.type === 'task.started' && kind === 'pickup') now--;
+    const t = e.taskId ? task.get(e.taskId) : undefined;
+    if (!t) continue;
+    if (e.type === 'task.finished' && t.type === 'register') {
+      const n = (done.get(t.jobId) ?? 0) + 1;
+      done.set(t.jobId, n);
+      if (n === (registerTasks.get(t.jobId) ?? 1) && !state.has(t.jobId)) {
+        state.set(t.jobId, 'waiting');
+        now++;
+      }
+    }
+    if (e.type === 'task.started' && t.type === 'pickup') {
+      if (state.get(t.jobId) === 'waiting') now--;
+      state.set(t.jobId, 'called');
+    }
     peak = Math.max(peak, now);
   }
   return peak;
@@ -612,12 +699,19 @@ function applyFacing(
     const moved = before && travelDirection(before, c);
     if (moved) c.facing = moved;
     else if (c.stage === 'leaving') c.facing = 'down';
-    else if (c.stage === 'line')
-      c.facing = near(c.y, lanes.topRowY)
-        ? 'left'
-        : near(c.y, lanes.bottomRowY)
-          ? 'right'
-          : 'up';
+    else if (c.stage === 'line') {
+      // Rows alternate direction; everyone faces toward the head of the line.
+      const row = lanes.queueRowsY.findIndex((y) => near(c.y, y));
+      c.facing = row < 0 ? 'up' : row % 2 === 0 ? 'left' : 'right';
+    }
     else c.facing = 'up';
   }
+}
+
+/** Register tasks per customer (1 in the mock; capture + payment per drink live). */
+function registerCounts(data: RunData) {
+  const counts = new Map<string, number>();
+  for (const t of data.tasks)
+    if (t.type === 'register') counts.set(t.jobId, (counts.get(t.jobId) ?? 0) + 1);
+  return counts;
 }

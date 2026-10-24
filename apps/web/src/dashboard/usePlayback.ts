@@ -6,6 +6,11 @@ import type { SimSpeed } from '../sync/source';
  * the UI (INTERFACE.md §3). With live delivery the clock follows the newest
  * simulated time until the viewer scrubs away.
  */
+/** Live clock: how far t may trail the newest time, in simulated seconds. */
+const LIVE_LAG = 2;
+/** Live clock rate before arrivals are observed (engine: 1 tick / 200 ms). */
+const LIVE_RATE_GUESS = 5;
+
 export function usePlayback(end: number, liveTime?: number) {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -14,10 +19,45 @@ export function usePlayback(end: number, liveTime?: number) {
   /** Timestamp of the previous animation frame, for frame-rate-independent playback. */
   const last = useRef<number | null>(null);
 
-  // Live: stick to the newest time unless the viewer scrubbed back.
+  /**
+   * Live: rows arrive in whole ticks (several per wall-clock second), so
+   * jumping to each new tick makes walkers teleport. Instead t glides toward
+   * the newest time at the observed arrival rate, never past it, and stays at
+   * most LIVE_LAG behind (snapping forward if it falls further back).
+   */
+  const latest = useRef(liveTime);
+  /** Simulated seconds per wall-clock second, estimated from arrivals. */
+  const rate = useRef(LIVE_RATE_GUESS);
+  const arrived = useRef<{ time: number; at: number } | null>(null);
   useEffect(() => {
-    if (liveTime !== undefined && following) setT(liveTime);
-  }, [liveTime, following]);
+    latest.current = liveTime;
+    if (liveTime === undefined) return;
+    const now = performance.now();
+    const prev = arrived.current;
+    if (prev && liveTime > prev.time && now > prev.at) {
+      const observed = ((liveTime - prev.time) * 1000) / (now - prev.at);
+      // Smooth the estimate; a single slow or bursty update should not jerk the clock.
+      rate.current = rate.current * 0.8 + observed * 0.2;
+    }
+    arrived.current = { time: liveTime, at: now };
+  }, [liveTime]);
+  const isLive = liveTime !== undefined;
+  useEffect(() => {
+    if (!isLive || !following) return;
+    let frame = 0;
+    let before: number | null = null;
+    const step = (now: number) => {
+      const dt = before === null ? 0 : (now - before) / 1000;
+      before = now;
+      const target = latest.current ?? 0;
+      setT((prev) =>
+        Math.min(target, Math.max(target - LIVE_LAG, prev + dt * rate.current)),
+      );
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [isLive, following]);
 
   // Replay: advance t by real elapsed time × speed each frame, stop at the end.
   useEffect(() => {

@@ -185,7 +185,8 @@ export interface Score {
   completedInT: number;
   totalJobs: number;
   lateCount: number;
-  planningMs: number;
+  /** Optimizer planning time in ms; null = not measured (shown as "Not measured"). */
+  planningMs: number | null;
   /** null = not measured (shown as "Not measured"). */
   execCost: number | null;
   objectiveValue?: number;

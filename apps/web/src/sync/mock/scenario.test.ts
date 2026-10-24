@@ -124,12 +124,10 @@ it('respects headcount: up to two per role, one cleaner', () => {
 });
 
 it('takes longer to order and to make with more and harder items', () => {
-  const [tea, , latte, , , mocha] = MENU;
-  expect(orderTime([tea, tea])).toBeGreaterThan(orderTime([tea]));
-  expect(orderTime([mocha])).toBeGreaterThan(orderTime([latte]));
-  expect(orderTime([latte])).toBeGreaterThan(orderTime([tea]));
-  expect(makeTime(mocha)).toBeGreaterThan(makeTime(latte));
-  expect(makeTime(latte)).toBeGreaterThan(makeTime(tea));
+  const [black, latte] = MENU;
+  expect(orderTime([black, black])).toBeGreaterThan(orderTime([black]));
+  expect(orderTime([latte])).toBeGreaterThan(orderTime([black]));
+  expect(makeTime(latte)).toBeGreaterThan(makeTime(black));
 });
 
 it('gives orders of one to three items with a readable label', () => {
@@ -140,4 +138,48 @@ it('gives orders of one to three items with a readable label', () => {
     for (const item of job.items) expect(job.label).toContain(item.name);
   }
   expect(run.jobs.some((j) => j.items.length > 1)).toBe(true);
+});
+
+describe('rush arrival gap (design/MOCK_AND_TEST_DESIGN.md §3.4)', () => {
+  /** Gaps between consecutive rush arrivals (first half of a morning run). */
+  const rushGaps = (rushGap?: number) => {
+    const jobs = simulate('baseline', { seed: 3, rushGap }).jobs;
+    return jobs
+      .slice(1, jobs.length / 2)
+      .map((j, i) => j.arrival - jobs[i].arrival);
+  };
+
+  it('keeps the 14 s default, so the demo is unchanged', () => {
+    expect(simulate('sync', { seed: 3, rushGap: 14 })).toEqual(
+      simulate('sync', { seed: 3 }),
+    );
+  });
+
+  it('packs rush arrivals closer when the gap is lowered', () => {
+    // Noise is 0–4 s per customer, so consecutive gaps stay within gap ± 4.
+    for (const g of rushGaps(5)) {
+      expect(g).toBeGreaterThan(1 - 1e-9);
+      expect(g).toBeLessThan(9 + 1e-9);
+    }
+    const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+    expect(mean(rushGaps(5))).toBeLessThan(mean(rushGaps()));
+  });
+
+  it('falls back to the default for gaps that are not a positive number', () => {
+    const base = simulate('baseline', { seed: 3 }).jobs;
+    for (const bad of [0, -3, Number.NaN, Number.POSITIVE_INFINITY])
+      expect(simulate('baseline', { seed: 3, rushGap: bad }).jobs).toEqual(
+        base,
+      );
+  });
+
+  it('gives both policies the same customers', () => {
+    const arrivals = (p: Policy) =>
+      simulate(p, { seed: 3, rushGap: 5, customers: 36 }).jobs.map((j) => [
+        j.id,
+        j.arrival,
+        j.label,
+      ]);
+    expect(arrivals('sync')).toEqual(arrivals('baseline'));
+  });
 });

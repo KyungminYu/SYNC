@@ -36,12 +36,19 @@ export interface Lanes {
   /** y of the top and bottom queue rows. */
   topRowY: number;
   bottomRowY: number;
+  /** y of every queue row, head row first (2, or more in pairs for long lines). */
+  queueRowsY: number[];
   /** Distance between two people in the order line. */
   spacing: number;
   /** Line longer than this (people) folds into the second row; rope shown then. */
   foldAfter: number;
   /** Rope between the two queue rows (open at the U-turn end). */
   rope: [Point, Point];
+  /**
+   * Ropes between consecutive queue rows, each open at its U-turn end, shown
+   * once the line is longer than `after` people (it reaches the next row).
+   */
+  ropes: Array<{ from: Point; to: Point; after: number }>;
   /** Fixed pickup waiting spots, in the order they are handed out. */
   waitingSpots: WaitingSpot[];
   /** Spur from the counter lane down to the waiting aisles. */
@@ -74,7 +81,12 @@ const zoneOf = (layout: Layout, kind: Zone['kind']) =>
  * ever wait for pickup at once: up to 10 fits the 5 × 2 grid; each further 5
  * adds a row, and the front wall (so the board) moves down by that row.
  */
-export function buildLanes(layout: Layout, waitingCapacity = 10): Lanes {
+export function buildLanes(
+  layout: Layout,
+  waitingCapacity = 10,
+  /** Most people ever in the order line; more than two rows hold adds rows in pairs. */
+  lineCapacity = 0,
+): Lanes {
   const registers = layout.resources.filter((r) => r.type === 'register');
   const counters = layout.resources.filter(
     (r) => r.type === 'register' || r.type === 'pickup',
@@ -102,15 +114,35 @@ export function buildLanes(layout: Layout, waitingCapacity = 10): Lanes {
   const row2 = qy + qh - 0.2;
   const doorX = entrance ? entrance.x + entrance.w / 2 : qx;
   const turnX = qx + qw;
-  const queuePath: Point[] = [
-    { x: headX, y: row1 },
-    { x: turnX, y: row1 },
-    { x: turnX, y: row2 },
-    { x: doorX, y: row2 },
-  ];
   const topRowLength = turnX - headX;
   // People who fit on the top row; more than this folds onto the bottom row.
   const foldAfter = Math.floor(topRowLength / QUEUE_SPACING) + 1;
+  // Each further row runs the full width between the door side and the U-turn.
+  const rowPlaces = Math.floor((turnX - doorX) / QUEUE_SPACING);
+  // A line longer than two rows hold gets two more rows at a time, so the
+  // tail always ends on the door side (nobody waits at the door).
+  const rowsY = [row1, row2];
+  while (foldAfter + (rowsY.length - 1) * rowPlaces < lineCapacity)
+    rowsY.push(
+      rowsY[rowsY.length - 1] + (row2 - row1),
+      rowsY[rowsY.length - 1] + 2 * (row2 - row1),
+    );
+  // Snake: head → U-turn on row 1, then alternate door side ↔ U-turn.
+  const queuePath: Point[] = [{ x: headX, y: row1 }];
+  rowsY.forEach((y, i) => {
+    const end = i % 2 === 0 ? turnX : doorX;
+    if (i > 0) queuePath.push({ x: queuePath[queuePath.length - 1].x, y });
+    queuePath.push({ x: end, y });
+  });
+  // Rope between rows i and i+1, open at the end where the line turns.
+  const ropes = rowsY.slice(0, -1).map((y, i) => {
+    const mid = y + (rowsY[i + 1] - y) / 2;
+    return {
+      from: { x: i % 2 === 0 ? doorX : doorX + 1, y: mid },
+      to: { x: i % 2 === 0 ? turnX - 1 : turnX, y: mid },
+      after: foldAfter + i * rowPlaces,
+    };
+  });
 
   // Waiting spots: rows in pairs around an aisle; only row 1 has no aisle (it
   // faces the counter lane). Extra rows push the front wall down.
@@ -146,7 +178,9 @@ export function buildLanes(layout: Layout, waitingCapacity = 10): Lanes {
   const baseWall = entrance ? entrance.y + entrance.h : qy + qh + 0.6;
   // Extra rows push the front wall down by exactly their height, so the
   // door row below the waiting area always stays clear.
-  const wallY = baseWall + Math.max(0, rowY[rows - 1] - rowY[1]);
+  const wallY =
+    baseWall +
+    Math.max(0, rowY[rows - 1] - rowY[1], rowsY[rowsY.length - 1] - row2);
   const exitX = exit ? exit.x + exit.w / 2 : wx + ww + 0.8;
   const doorSpan = (z: Zone | undefined, x: number): [number, number] =>
     z ? [z.x, z.x + z.w] : [x - 0.4, x + 0.4];
@@ -163,14 +197,13 @@ export function buildLanes(layout: Layout, waitingCapacity = 10): Lanes {
     topRowLength,
     door: { x: doorX, y: wallY },
     topRowY: row1,
-    bottomRowY: row2,
+    bottomRowY: rowsY[rowsY.length - 1],
+    queueRowsY: rowsY,
     spacing: QUEUE_SPACING,
     foldAfter,
     // Open at the U-turn end (right).
-    rope: [
-      { x: doorX, y: row1 + (row2 - row1) * 0.5 },
-      { x: turnX - 1, y: row1 + (row2 - row1) * 0.5 },
-    ],
+    rope: [ropes[0].from, ropes[0].to],
+    ropes,
     waitingSpots,
     spurX,
     exitX,

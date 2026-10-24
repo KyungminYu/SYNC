@@ -4,7 +4,7 @@ import { simulate } from '../../sync/mock/scenario';
 import { normalizeRun } from './normalize';
 import { GUEST_KINDS, guestKind, sceneAt } from './scene';
 import { decisionsAt } from './decisions';
-import { buildLanes } from './lanes';
+import { buildLanes, pathLength } from './lanes';
 import type { SyncEvent } from '../../sync/contract';
 
 const run = normalizeRun(simulate('sync', { seed: 5 }));
@@ -208,6 +208,8 @@ describe('lanes and waiting spots (design/FIGMA_GUIDE.md "손님 동선")', () =
   });
 
   it('lets orders finish out of arrival order (pickup is not a queue)', () => {
+    // Seed 2: a latte ordered first finishes after a later black coffee.
+    const run = normalizeRun(simulate('sync', { seed: 2 }));
     const served = run.events
       .filter((e) => e.type === 'job.completed')
       .map((e) => e.jobId!);
@@ -355,5 +357,64 @@ describe('pixel-art presentation data', () => {
     expect(
       sceneAt(run, done.t + 0.6).customers.find((c) => c.id === job.id)?.facing,
     ).toBe('right');
+  });
+});
+
+describe('High load (design/MOCK_AND_TEST_DESIGN.md §5.6)', () => {
+  it('reaches the rope fold with a 5 s rush gap, which the default never does', () => {
+    /** True if the line folds behind the rope at any second up to T. */
+    const folds = (rushGap?: number) => {
+      const data = normalizeRun(
+        simulate('baseline', { seed: 1, customers: 36, rushGap }),
+      );
+      for (let t = 0; t <= 420; t += 1)
+        if (sceneAt(data, t).queueFolded) return true;
+      return false;
+    };
+    expect(folds(5)).toBe(true);
+    expect(folds()).toBe(false);
+  });
+});
+
+describe('customers arriving together', () => {
+  // c2 arrives at exactly the same moment as c1 (a group).
+  const base = normalizeRun(simulate('sync', { seed: 5 }));
+  const t1 = base.jobs.find((j) => j.id === 'c1')!.arrival;
+  const group = normalizeRun({
+    ...base,
+    events: base.events.map((e) =>
+      e.type === 'job.arrived' && e.jobId === 'c2' ? { ...e, t: t1 } : e,
+    ),
+  });
+  const lanes = buildLanes(group.layout);
+  const at = (t: number, id: string) =>
+    sceneAt(group, t, lanes).customers.find((c) => c.id === id);
+
+  it('file in one after another instead of waiting stacked at the door', () => {
+    expect(at(t1 + 0.05, 'c1')).toBeDefined();
+    expect(at(t1 + 0.05, 'c2')).toBeUndefined();
+  });
+
+  it('walk in apart and take separate places in line', () => {
+    const t = t1 + 1;
+    const a = at(t, 'c1')!;
+    const b = at(t, 'c2')!;
+    expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(0.5);
+  });
+});
+
+describe('long order lines', () => {
+  it('add queue rows in pairs and push the front wall down', () => {
+    const short = buildLanes(run.layout, 10, 10);
+    const long = buildLanes(run.layout, 10, 20);
+    expect(short.queueRowsY).toHaveLength(2);
+    expect(long.queueRowsY).toHaveLength(4);
+    expect(long.wallY).toBeGreaterThan(short.wallY);
+    // Everyone gets a place of their own: the snake holds the whole line.
+    const places = Math.floor(pathLength(long.queuePath) / long.spacing) + 1;
+    expect(places).toBeGreaterThanOrEqual(20);
+    // The tail ends on the door side, next to the entrance.
+    expect(long.queuePath[long.queuePath.length - 1].x).toBeCloseTo(long.door.x);
+    expect(long.ropes).toHaveLength(3);
   });
 });

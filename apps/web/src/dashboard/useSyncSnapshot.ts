@@ -27,6 +27,11 @@ export function useSyncSnapshot(source: SyncSource) {
     return {
       status: snapshot.status,
       benchmark: snapshot.benchmark,
+      note: snapshot.note,
+      emptyHint: snapshot.emptyHint,
+      scenarios: snapshot.scenarios,
+      scenarioId: snapshot.scenarioId,
+      viewer: snapshot.viewer,
       runs,
       issues,
     };

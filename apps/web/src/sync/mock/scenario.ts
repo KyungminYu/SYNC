@@ -16,6 +16,11 @@ import type {
   SyncEvent,
   Task,
 } from '../contract';
+import { MENU } from '../menu';
+import { buildLayout, WALK_IN, type StaffCounts } from '../shopLayout';
+
+// Re-exported so existing callers (tests, feeder) keep one import site.
+export { MENU, buildLayout };
 
 /**
  * Sample coffee-shop scenario for the mock backend (docs/SCENARIO.md).
@@ -33,24 +38,19 @@ export interface ScenarioOptions {
   seed: number;
   /** 'morning' front-loads arrivals (rush); anything else spaces them evenly. */
   scenario?: string;
+  /**
+   * Seconds between arrivals during the morning rush (default 14). Lower it
+   * to load the floor harder (design/MOCK_AND_TEST_DESIGN.md §3.4); values
+   * that are not a positive number fall back to the default.
+   */
+  rushGap?: number;
   /** Number of customers (orders). */
   customers?: number;
   /** Fixed horizon T in simulated seconds, used by objective (20). */
   T?: number;
   /** Headcount per role (1–2). The cleaner is always 1. */
-  staff?: Partial<Record<Exclude<Role, 'cleaner'>, 1 | 2>>;
+  staff?: StaffCounts;
 }
-
-/** Menu with a difficulty per item; harder items take longer to order and make. */
-export const MENU: OrderItem[] = [
-  { name: 'Tea', complexity: 'simple' },
-  { name: 'Americano', complexity: 'simple' },
-  { name: 'Latte', complexity: 'medium' },
-  { name: 'Flat white', complexity: 'medium' },
-  { name: 'Cold brew', complexity: 'medium' },
-  { name: 'Mocha', complexity: 'complex' },
-  { name: 'Seasonal special', complexity: 'complex' },
-];
 
 /**
  * Sample duration model in seconds (docs/SCENARIO.md §5). More and harder
@@ -94,7 +94,7 @@ export function makeTime(item: OrderItem, k = 1) {
   return k * DURATION_MODEL.makeBase[item.complexity];
 }
 
-/** Human label for an order, e.g. "Latte ×2 + Mocha". */
+/** Human label for an order, e.g. "Latte ×2 + Black coffee". */
 function orderLabel(items: OrderItem[]) {
   const counts = new Map<string, number>();
   for (const i of items) counts.set(i.name, (counts.get(i.name) ?? 0) + 1);
@@ -123,52 +123,10 @@ const SHORT_WORK: Record<ResourceType, string> = {
   pickup: 'hand-off',
   clean: 'clean-up',
 };
-/** Seconds a customer needs to walk from the door to the counter before ordering can start. */
-const WALK_IN = 2;
 /** SYNC sample only: send a server to pickup when the drinks finish within this many seconds. */
 const PREPOSITION_WINDOW = 6;
-
-/**
- * Slot id, type, label and centre in grid units. One grid unit = one 48 px
- * pixel-art tile; the floor is 17 × 10 tiles, matching Figma "Pixel floor ·
- * draft v1" (tile centres are column + 0.5).
- */
-const SLOT_POS: Array<[string, ResourceType, string, number, number]> = [
-  ['reg1', 'register', 'Register 1', 2.5, 4.5],
-  ['reg2', 'register', 'Register 2', 4.5, 4.5],
-  ['bar1', 'bar', 'Bar 1', 5.5, 1.5],
-  ['bar2', 'bar', 'Bar 2', 7.5, 1.5],
-  ['pick1', 'pickup', 'Pickup 1', 11.5, 4.5],
-  ['pick2', 'pickup', 'Pickup 2', 13.5, 4.5],
-  ['clean1', 'clean', 'Clean 1', 14.5, 1.5],
-];
-/** Where staff stand to work a slot: behind the counter (front row) or at the bar (back row). */
-const STAND_Y: Record<ResourceType, number> = {
-  register: 3.5,
-  pickup: 3.5,
-  bar: 2.5,
-  clean: 2.5,
-};
-/** Each role's primary slot type. */
-const ROLE_TYPE: Record<Role, ResourceType> = {
-  cashier: 'register',
-  barista: 'bar',
-  server: 'pickup',
-  cleaner: 'clean',
-};
-const ROLE_NAME: Record<Role, string> = {
-  cashier: 'Cashier',
-  barista: 'Barista',
-  server: 'Server',
-  cleaner: 'Cleaner',
-};
-/** Starting position per role, in grid units. */
-const HOME: Record<Role, [number, number]> = {
-  cashier: [2.5, 3.5],
-  barista: [5.5, 2.5],
-  server: [11.5, 3.5],
-  cleaner: [14.5, 2.5],
-};
+/** Default seconds between arrivals during the morning rush (ScenarioOptions.rushGap). */
+export const DEFAULT_RUSH_GAP = 14;
 
 /** Small deterministic PRNG (LCG) so a seed always reproduces the same run. */
 export function rng(seed: number) {
@@ -176,91 +134,6 @@ export function rng(seed: number) {
   return () => {
     n = (Math.imul(n, 1664525) + 1013904223) >>> 0;
     return n / 4294967296;
-  };
-}
-
-/**
- * Floor layout: 7 slots, zones for animation, and the staff for this
- * scenario. Same-role staff get numbered names and slightly offset homes.
- */
-export function buildLayout(staff: ScenarioOptions['staff'] = {}): Layout {
-  const resources: Resource[] = SLOT_POS.map(([id, type, label, x, y]) => ({
-    id,
-    type,
-    label,
-    x,
-    y,
-    standX: x,
-    standY: STAND_Y[type],
-  }));
-  const agents: Agent[] = [];
-  for (const role of ['cashier', 'barista', 'server', 'cleaner'] as Role[]) {
-    const count = role === 'cleaner' ? 1 : (staff[role] ?? 1);
-    for (let i = 0; i < count; i++) {
-      const [hx, hy] = HOME[role];
-      agents.push({
-        id: count > 1 ? `${role}${i + 1}` : role,
-        name: count > 1 ? `${ROLE_NAME[role]} ${i + 1}` : ROLE_NAME[role],
-        role,
-        primaryTypes: [ROLE_TYPE[role]],
-        startX: hx + (count > 1 ? (i ? 0.45 : -0.45) : 0),
-        startY: hy,
-      });
-    }
-  }
-  return {
-    resources,
-    agents,
-    zones: [
-      {
-        id: 'staff',
-        kind: 'staff',
-        label: 'Staff',
-        x: 0,
-        y: 0,
-        w: 17,
-        h: 5,
-      },
-      // Customer-side areas (docs/SCENARIO.md §2). The UI turns them into lanes:
-      // doors in the front wall, a 2-row switchback queue, a 5 × 2 grid of
-      // pickup waiting spots. Not drawn as boxes.
-      {
-        id: 'entrance',
-        kind: 'entrance',
-        label: 'Entrance',
-        x: 1,
-        y: 9,
-        w: 1,
-        h: 0.95,
-      },
-      {
-        id: 'queue',
-        kind: 'queue',
-        label: 'Line',
-        x: 1.5,
-        y: 6.3,
-        w: 8,
-        h: 2.4,
-      },
-      {
-        id: 'waiting',
-        kind: 'waiting',
-        label: 'Waiting',
-        x: 11.22,
-        y: 6.23,
-        w: 4.56,
-        h: 2.54,
-      },
-      {
-        id: 'exit',
-        kind: 'exit',
-        label: 'Exit',
-        x: 16,
-        y: 9,
-        w: 1,
-        h: 0.95,
-      },
-    ],
   };
 }
 
@@ -306,6 +179,12 @@ interface SimAgent extends Agent {
  */
 export function simulate(policy: Policy, options: ScenarioOptions): RunData {
   const { seed, scenario = 'morning', customers = 24, T = 420 } = options;
+  const rushGap =
+    options.rushGap !== undefined &&
+    Number.isFinite(options.rushGap) &&
+    options.rushGap > 0
+      ? options.rushGap
+      : DEFAULT_RUSH_GAP;
   const random = rng(seed);
   const round = (v: number) => Math.round(v * 100) / 100;
   const layout = buildLayout(options.staff);
@@ -319,7 +198,7 @@ export function simulate(policy: Policy, options: ScenarioOptions): RunData {
     const id = `c${i + 1}`;
     const rush = scenario === 'morning' && i < customers / 2;
     // Arrivals: tighter spacing during the morning rush, plus a little noise.
-    const arrival = round(i * (rush ? 14 : 17) + random() * 4);
+    const arrival = round(i * (rush ? rushGap : 17) + random() * 4);
     // Sample deadline rule. Provisional: ask the user before changing (late definition).
     const deadline = round(arrival + 90);
     // 1 item 55%, 2 items 30%, 3 items 15%.

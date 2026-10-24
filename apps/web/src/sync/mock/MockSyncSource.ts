@@ -180,7 +180,7 @@ export class MockSyncSource implements SyncSource {
         : scoreAt(
             data,
             t,
-            (full.score!.planningMs * data.decisions.length) /
+            ((full.score!.planningMs ?? 0) * data.decisions.length) /
               Math.max(1, full.decisions.length),
           );
       runs[policy] = data;

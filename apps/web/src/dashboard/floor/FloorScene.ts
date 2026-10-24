@@ -84,6 +84,9 @@ export class FloorScene extends Phaser.Scene {
   }
 
   /** Floor, walls, counters and decor: drawn once, they never change during a run. */
+  /** IN / OUT doors and signs; moved with the front wall each frame. */
+  private doors?: Phaser.GameObjects.Container;
+
   private buildStatic(scene: FloorState) {
     this.built = true;
     const W = GRID.offsetX * 2 + GRID.width * GRID.unit;
@@ -152,30 +155,32 @@ export class FloorScene extends Phaser.Scene {
         px(sink.x) + TILE_PX,
         py(sink.y),
       );
-    // Doors in the front wall: open glass doors with IN / OUT signs.
-    const doorY = py(lanes.wallY) - HALF;
-    const signs = this.add.graphics().setDepth(4);
+    // Doors in the front wall: open glass doors with IN / OUT signs. They sit
+    // in one container that follows the wall when the board grows (update).
+    this.doors = this.add.container(0, 0).setDepth(4);
+    const signs = this.add.graphics();
+    this.doors.add(signs);
     for (const [span, label] of [
       [lanes.doorIn, 'IN'],
       [lanes.doorOut, 'OUT'],
     ] as const) {
       const dx = px((span[0] + span[1]) / 2);
-      this.add
-        .image(dx, doorY, SHEETS.urban.key, URBAN.doorOpen)
-        .setScale(SCALE)
-        .setDepth(3);
+      this.doors.add(
+        this.add.image(dx, 0, SHEETS.urban.key, URBAN.doorOpen).setScale(SCALE),
+      );
       const w = label.length * 7 + 10;
-      signs.fillStyle(c.good, 1).fillRect(dx - w / 2, doorY - HALF - 14, w, 12);
-      this.add
-        .text(dx, doorY - HALF - 8, label, {
-          fontFamily: FONT,
-          fontSize: '8px',
-          fontStyle: '700',
-          color: css(c.onAccent),
-          resolution: 2,
-        })
-        .setOrigin(0.5)
-        .setDepth(5);
+      signs.fillStyle(c.good, 1).fillRect(dx - w / 2, -HALF - 14, w, 12);
+      this.doors.add(
+        this.add
+          .text(dx, -HALF - 8, label, {
+            fontFamily: FONT,
+            fontSize: '8px',
+            fontStyle: '700',
+            color: css(c.onAccent),
+            resolution: 2,
+          })
+          .setOrigin(0.5),
+      );
     }
   }
 
@@ -254,6 +259,8 @@ export class FloorScene extends Phaser.Scene {
     this.used.clear();
     if (!scene) return this.hideUnused();
     if (!this.built) this.buildStatic(scene);
+    // Doors stay in the front wall even after extra rows moved it down.
+    this.doors?.setY(py(scene.lanes.wallY) - HALF);
     this.drawWallAndRope(scene);
     for (const s of scene.slots)
       this.drawSlot(s, highlight.resourceId === s.id, time, reducedMotion);
@@ -283,27 +290,29 @@ export class FloorScene extends Phaser.Scene {
       right - px(lanes.doorOut[1]),
       4,
     );
-    if (!scene.queueFolded) return;
-    const [a, b] = lanes.rope;
-    const from = px(a.x),
-      to = px(b.x);
-    const count = Math.max(2, Math.round((to - from) / TILE_PX) + 1);
-    for (let i = 0; i < count; i++) {
-      const frame =
-        i === 0
-          ? URBAN.ropeLeft
-          : i === count - 1
-            ? URBAN.ropeRight
-            : URBAN.ropeMid;
-      this.sprite(
-        `rope:${i}`,
-        SHEETS.urban.key,
-        frame,
-        from + (i * (to - from)) / (count - 1),
-        py(a.y),
-        3 + a.y,
-      );
-    }
+    // A rope appears once the line reaches the row below it.
+    lanes.ropes.forEach((rope, r) => {
+      if (scene.lineLength <= rope.after) return;
+      const from = px(rope.from.x),
+        to = px(rope.to.x);
+      const count = Math.max(2, Math.round((to - from) / TILE_PX) + 1);
+      for (let i = 0; i < count; i++) {
+        const frame =
+          i === 0
+            ? URBAN.ropeLeft
+            : i === count - 1
+              ? URBAN.ropeRight
+              : URBAN.ropeMid;
+        this.sprite(
+          `rope:${r}:${i}`,
+          SHEETS.urban.key,
+          frame,
+          from + (i * (to - from)) / (count - 1),
+          py(rope.from.y),
+          3 + rope.from.y,
+        );
+      }
+    });
   }
 
   /** A slot as furniture: name plate, progress bar when busy, dashed outline when claimed, steam. */

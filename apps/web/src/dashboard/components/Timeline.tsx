@@ -19,6 +19,8 @@ interface Props {
   T: number;
   playing: boolean;
   live: boolean;
+  /** False when time is driven elsewhere (live feeder): hides play, step and speed. */
+  controls?: boolean;
   speed: SimSpeed;
   markers: Marker[];
   onToggle(): void;
@@ -31,7 +33,7 @@ export function Timeline(p: Props) {
   const pct = (v: number) => `${(100 * v) / Math.max(1, p.end)}%`;
   return (
     <footer className="timeline" aria-label="Timeline">
-      <div className="controls">
+      <div className="controls" hidden={p.controls === false}>
         <button
           onClick={p.onToggle}
           aria-label={p.live ? 'Follow live' : p.playing ? 'Pause' : 'Play'}
