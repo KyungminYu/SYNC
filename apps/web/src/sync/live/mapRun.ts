@@ -366,16 +366,32 @@ export function mapRun(
       successor.deps.push(predecessor);
   }
   /**
-   * Where each task is shown. `onFloor` = its person is drawn doing it; false
-   * when that person is already working another task (one person per role).
+   * Where each task is shown and who works it (Figma "Staff rules v4"):
+   * one person per role, no work at a slot with nobody at it, and nobody
+   * leaves mid-task. `onFloor` is false only when no person can be drawn
+   * doing the task (then it shows on its slot alone).
    */
   const taskPlaces = new Map<
     string,
     { agentId: string; resourceId: string; onFloor: boolean }
   >();
   const busyUntil = new Map<string, number>();
-  /** When each person is free again. */
+  /** When each person is free again (after every task they hold). */
   const agentFreeAt = new Map<string, number>();
+  /** The slot each person is working at while busy. */
+  const agentAt = new Map<string, string>();
+  const fixed = new Set(layout.agents.filter((a) => a.fixed).map((a) => a.id));
+  const typeOf = new Map(layout.resources.map((r) => [r.id, r.type]));
+  /** The person whose own role works this slot type ("pickup" → server). */
+  const ownerOf = (type: ResourceType) =>
+    layout.agents.find((a) => a.primaryTypes.includes(type))?.id;
+  /** A person's own slot: where they start. */
+  const homeOf = (id: string) => {
+    const a = layout.agents.find((x) => x.id === id)!;
+    return layout.resources.find(
+      (r) => (r.standX ?? r.x) === a.startX && (r.standY ?? r.y) === a.startY,
+    )?.id;
+  };
   for (const task of [...taskRows].sort(
     (a, b) => (a.startedTick ?? Infinity) - (b.startedTick ?? Infinity),
   )) {
@@ -384,26 +400,64 @@ export function mapRun(
         ? undefined
         : slotOf.get(String(task.workerId));
     if (!home || task.startedTick === undefined || !isRole(task.role)) continue;
+    const s = task.startedTick;
+    const end = task.finishedTick ?? Infinity;
     const type = ROLE_TYPE[task.role];
     const choices = layout.resources.filter((r) => r.type === type);
-    const station =
-      choices.find(
-        (r) =>
-          r.id === home.resourceId &&
-          (busyUntil.get(r.id) ?? 0) <= task.startedTick!,
-      ) ??
-      choices.find((r) => (busyUntil.get(r.id) ?? 0) <= task.startedTick!);
-    // Every slot of this type is taken: never draw a second task on one slot.
+    const isFree = (id: string) => (agentFreeAt.get(id) ?? 0) <= s;
+    const freeSlot = (prefer?: string) =>
+      choices.find((r) => r.id === prefer && (busyUntil.get(r.id) ?? 0) <= s) ??
+      choices.find((r) => (busyUntil.get(r.id) ?? 0) <= s);
+    let who = home.agentId;
+    let station: string | undefined;
+    if (fixed.has(who)) {
+      // Baseline: everything is done at the person's own slot (no walking).
+      station = isFree(who) ? homeOf(who) : agentAt.get(who);
+    } else if (isFree(who)) {
+      station = freeSlot(home.resourceId)?.id;
+    } else if (typeOf.get(agentAt.get(who)!) === type) {
+      // The role's second worker ran a task of the same kind at the same
+      // time: the one person works it at the slot they are already at.
+      station = agentAt.get(who);
+    } else {
+      // Busy with something else: the task type's own person takes it, or
+      // joins the slot that person is working.
+      const owner = ownerOf(type);
+      if (owner && !fixed.has(owner) && isFree(owner)) {
+        who = owner;
+        station = freeSlot(homeOf(owner))?.id;
+      } else if (owner && typeOf.get(agentAt.get(owner) ?? '') === type) {
+        who = owner;
+        station = agentAt.get(owner);
+      } else {
+        // Its own person is helping elsewhere: an idle person takes it, else
+        // someone already working a slot of this type joins it.
+        const idle = layout.agents.find((a) => !fixed.has(a.id) && isFree(a.id));
+        const there = layout.agents.find(
+          (a) => typeOf.get(agentAt.get(a.id) ?? '') === type && !isFree(a.id),
+        );
+        if (idle) {
+          who = idle.id;
+          station = freeSlot()?.id;
+        } else if (there) {
+          who = there.id;
+          station = agentAt.get(there.id);
+        }
+      }
+    }
+    let onFloor = station !== undefined;
+    if (!station) {
+      // Nobody can be drawn on it: show it on a slot of its type alone.
+      station = freeSlot(home.resourceId)?.id ?? choices[0]?.id;
+      onFloor = false;
+    }
     if (!station) continue;
-    const end = task.finishedTick ?? Infinity;
-    const onFloor = (agentFreeAt.get(home.agentId) ?? 0) <= task.startedTick;
-    if (onFloor) agentFreeAt.set(home.agentId, end);
-    taskPlaces.set(String(task.id), {
-      agentId: home.agentId,
-      resourceId: station.id,
-      onFloor,
-    });
-    busyUntil.set(station.id, end);
+    if (onFloor) {
+      if (isFree(who)) agentAt.set(who, station);
+      agentFreeAt.set(who, Math.max(agentFreeAt.get(who) ?? 0, end));
+    }
+    taskPlaces.set(String(task.id), { agentId: who, resourceId: station, onFloor });
+    busyUntil.set(station, Math.max(busyUntil.get(station) ?? 0, end));
   }
 
   // Events from task timestamps. Same-tick order: arrivals, finishes and

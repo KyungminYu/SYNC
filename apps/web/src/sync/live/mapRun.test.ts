@@ -301,14 +301,21 @@ describe('one person per role and per slot', () => {
     const data = normalizeRun(mapRun(rows, 'sync'));
     expect(ids(data, 12)).toEqual(['cashier', 'barista', 'server', 'cleaner']);
     const scene = sceneAt(data, 12);
-    // Both registers show their task; only one has a person at it.
-    expect(scene.slots.filter((s) => s.state === 'busy').map((s) => s.id)).toEqual(
-      expect.arrayContaining(['reg1', 'reg2']),
-    );
+    // No work without a person: both orders are taken at the cashier's register.
+    expect(scene.slots.filter((s) => s.state === 'busy').map((s) => s.id)).toEqual(['reg1']);
     const cashier = scene.agents.find((a) => a.id === 'cashier')!;
-    expect(cashier.state).toBe('working');
-    const atReg2 = scene.agents.filter((a) => a.x === 4.5 && a.y === 3.5);
-    expect(atReg2.length).toBeLessThanOrEqual(1);
+    expect(cashier).toMatchObject({ state: 'working', x: 2.5, y: 3.5 });
+  });
+
+  it('keeps a person at their slot until every task they hold is done', () => {
+    // Cashier 2's payment runs to tick 16, past cashier 1's (15): one person, one slot.
+    const data = normalizeRun(mapRun(rows, 'sync'));
+    for (const t of [13, 14, 15]) {
+      const scene = sceneAt(data, t);
+      expect(scene.agents.find((a) => a.id === 'cashier')).toMatchObject({ state: 'working', x: 2.5 });
+      expect(scene.slots.find((s) => s.id === 'reg2')?.state).toBe('idle');
+    }
+    expect(sceneAt(data, 16.5).agents.find((a) => a.id === 'cashier')?.state).toBe('idle');
   });
 
   it('sends an idle person whose slot is taken to the staff spot (SYNC)', () => {
@@ -331,7 +338,7 @@ describe('one person per role and per slot', () => {
     });
   });
 
-  it('never moves Baseline staff; cross-role work shows on the slot only', () => {
+  it('never moves Baseline staff; cross-role work is done at their own slot', () => {
     const helped = normalizeRun(
       mapRun(
         { ...rows, tasks: [...rows.tasks, task(11n, 'collect_tray', 'cleaner', 21n, 35, 37)] },
@@ -342,7 +349,9 @@ describe('one person per role and per slot', () => {
     const scene = sceneAt(helped, 36);
     const server = scene.agents.find((a) => a.id === 'server')!;
     expect(server).toMatchObject({ state: 'working', helping: true, x: 11.5, y: 3.5 });
-    expect(scene.slots.find((s) => s.id === 'clean1')?.state).toBe('busy');
+    // The tray is collected at the server's own pickup, never at an empty sink.
+    expect(scene.slots.find((s) => s.id === 'pick1')?.state).toBe('busy');
+    expect(scene.slots.find((s) => s.id === 'clean1')?.state).toBe('idle');
     const cleaner = scene.agents.find((a) => a.id === 'cleaner')!;
     expect(cleaner).toMatchObject({ x: 14.5, y: 2.5 });
     // No staff position ever changes in Baseline.

@@ -166,7 +166,12 @@ export function sceneAt(
   const slots = new Map(
     layout.resources.map((r) => [
       r.id,
-      { busy: undefined as SyncEvent | undefined, claimed: false },
+      {
+        busy: undefined as SyncEvent | undefined,
+        /** Tasks running here now; one person may work two at one slot. */
+        active: [] as SyncEvent[],
+        claimed: false,
+      },
     ]),
   );
   const agents = new Map(
@@ -177,6 +182,8 @@ export function sceneAt(
         task: undefined as string | undefined,
         working: false,
         waiting: false,
+        /** Tasks this person is working now (busy until every one is done). */
+        active: new Set<string>(),
       },
     ]),
   );
@@ -239,13 +246,18 @@ export function sceneAt(
       // Work begins. Taking the order puts the customer at a register;
       // the hand off puts them at a pickup counter.
       case 'task.started':
-        if (agent)
+        if (agent) {
+          agent.active.add(e.taskId!);
           Object.assign(agent, {
             working: true,
             waiting: false,
             task: e.taskId,
           });
-        if (slot) slot.busy = e;
+        }
+        if (slot) {
+          slot.active.push(e);
+          slot.busy = e;
+        }
         // Only the first register task moves the customer; later ones (more
         // drinks, payment) keep them at the register they walked to.
         if (customer && type === 'register' && customer.stage === 'line')
@@ -274,8 +286,16 @@ export function sceneAt(
         break;
       // Work ends. After ordering, the customer moves to the waiting area.
       case 'task.finished':
-        if (agent) Object.assign(agent, { working: false, task: undefined });
-        if (slot) slot.busy = undefined;
+        // Still working (and the slot still busy) while another task runs there.
+        if (agent) {
+          agent.active.delete(e.taskId!);
+          agent.working = agent.active.size > 0;
+          agent.task = agent.working ? [...agent.active].at(-1) : undefined;
+        }
+        if (slot) {
+          slot.active = slot.active.filter((a) => a.taskId !== e.taskId);
+          slot.busy = slot.active.at(-1);
+        }
         if (customer && type === 'register')
           customer.registersDone = (customer.registersDone ?? 0) + 1;
         if (
