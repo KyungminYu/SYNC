@@ -50,6 +50,27 @@ port 3003 (or set PORT to the provider's HTTP port), supply the same runtime
 variables, and mount the volume. Use the image's default command. There is no
 static output directory or separate frontend deployment.
 
+### Render
+
+`render.yaml` describes this application as a Render Blueprint (Docker web
+service, health check `/health`). The Vercel deployment can stay as it is;
+Render is a second URL whose Run button finishes scenarios.
+
+1. Render dashboard → New → Blueprint → select this repository (or a fork).
+2. Enter `SPACETIMEDB_DATABASE` (for example `syncdb-48ms7`) and, optionally,
+   `ANTHROPIC_API_KEY`. `SYNC_RUNNER_TOKEN` is generated; copy it from the
+   service's Environment tab: it is the operator access code for Run/Stop.
+3. Deploy, then open `https://<service>.onrender.com/health` (expect
+   `runtime: "sync-container"`) and `/sync-config.js` (expect the database).
+
+`SYNC_RUNNER_ORIGIN` defaults to Render's `RENDER_EXTERNAL_URL`; set it only
+for a custom domain. The free plan sleeps after 15 idle minutes (the first
+request then takes about a minute) and has no disk, so `/app/.local` (feeder
+identities) is lost on each restart: runs stay in the database, and a new
+scenario grants the current browser again. On a paid plan, uncomment the disk
+in `render.yaml`. A Render URL is a new browser origin with its own identity,
+so runs fed from elsewhere need a viewer grant for it.
+
 To build a reusable image and run it without Compose:
 
 ```powershell
