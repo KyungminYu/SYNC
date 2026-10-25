@@ -41,6 +41,8 @@ test('five duplicate drinks remain five orders with a single joined handoff and 
   assert.equal(s.recipes.length, 1);
   assert.equal(s.tasks.filter((t) => t.kind === 'deliver_order').length, 2);
   closeArrivals(s, owner);
+  // Second workers are opt-in (the shop keeps one person per role by default).
+  setPolicy(s, owner, { adaptiveStaffing: true });
   setRunning(s, owner, true);
   let peak = 4;
   for (let i = 0; i < 500 && s.run.status !== 'completed'; i++) {

@@ -442,17 +442,23 @@ export function mapRun(
       station =
         servesCustomer && typeOf.get(at ?? '') !== type ? undefined : at;
     } else {
-      // Keep your post (Figma "Staff rules v5"): the slot type's own person
-      // takes it at their own slot, or — when busy — at the slot they are
-      // already working (always that type, since they never leave it). So
-      // nobody walks over to help and no slot runs while someone walks.
+      // SYNC: the worker the engine chose does the task. A helper from
+      // another role walks to a free slot of the task's type when they are
+      // free; the floor then glides them there and back (decisions say
+      // "helping" for the same task).
       const owner = ownerOf(type) ?? who;
-      who = owner;
-      station = isFree(owner)
-        ? slotFor(owner)
-        : typeOf.get(agentAt.get(owner) ?? '') === type
-          ? agentAt.get(owner)
-          : undefined;
+      if (who !== owner && isFree(who)) station = slotFor(who);
+      if (!station) {
+        // Otherwise keep your post (Figma "Staff rules v5"): the slot
+        // type's own person takes it at their own slot, or — when busy — at
+        // the slot they are already working (always that type).
+        who = owner;
+        station = isFree(owner)
+          ? slotFor(owner)
+          : typeOf.get(agentAt.get(owner) ?? '') === type
+            ? agentAt.get(owner)
+            : undefined;
+      }
     }
     let onFloor = station !== undefined;
     if (!station) {
