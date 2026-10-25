@@ -37,7 +37,8 @@ if (!!process.env.SYNC_AGENT_ADAPTER !== !!process.env.SYNC_AGENT_RUN_ID)
 const runner = createRunnerServer(
   databaseConfig('production'),
   process.env.SYNC_RUNNER_TOKEN ?? '',
-  process.env.SYNC_RUNNER_ORIGIN ?? '',
+  // Render provides the service's public URL; an explicit origin wins.
+  process.env.SYNC_RUNNER_ORIGIN || process.env.RENDER_EXTERNAL_URL || '',
 );
 runner.server.listen(port, '0.0.0.0', () => {
   console.log(
