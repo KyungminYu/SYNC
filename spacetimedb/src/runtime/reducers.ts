@@ -31,7 +31,10 @@ import { load, save } from './store.ts';
 import type { MutableDb } from './store.ts';
 import { isRecipeId } from '../domain/recipes.ts';
 
-/** Diagnostic host timers only; elapsed time never affects reducer decisions. */
+/**
+ * Diagnostic host timer only; elapsed time never affects reducer decisions.
+ * One total span per tick keeps the database log readable.
+ */
 function timeTickPhase<T>(label: string, work: () => T): T {
   console.time(label);
   try {
@@ -206,14 +209,14 @@ export const step_run = db.reducer({ runId: t.u64() }, (ctx, args) => {
   const label = `[perf] step_run run=${args.runId}`;
   timeTickPhase(`${label} total`, () => {
     const store = ctx.db as unknown as MutableDb;
-    const s = timeTickPhase(`${label} load`, () => load(store, args.runId));
+    const s = load(store, args.runId);
     requireControl(s, { identityHex: ctx.sender.toHexString() });
     // Manual step is deliberately paused-only to avoid a browser speeding up a live clock.
     if (s.run.status !== 'paused') throw new Error('PAUSE_BEFORE_MANUAL_STEP');
     s.run.status = 'running';
-    timeTickPhase(`${label} advance`, () => advance(s));
+    advance(s);
     if (s.run.status === 'running') s.run.status = 'paused';
-    timeTickPhase(`${label} save`, () => save(store, s));
+    save(store, s);
   });
 });
 export const tick_run = db.reducer(
@@ -231,9 +234,9 @@ export const tick_run = db.reducer(
     const label = `[perf] tick_run run=${arg.runId}`;
     timeTickPhase(`${label} total`, () => {
       const store = ctx.db as unknown as MutableDb;
-      const s = timeTickPhase(`${label} load`, () => load(store, arg.runId));
-      timeTickPhase(`${label} advance`, () => advance(s));
-      timeTickPhase(`${label} save`, () => save(store, s));
+      const s = load(store, arg.runId);
+      advance(s);
+      save(store, s);
       if (s.run.status !== 'running')
         ctx.db.clock.scheduledId.delete(arg.scheduledId);
     });

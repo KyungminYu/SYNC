@@ -1,0 +1,36 @@
+# Render Blueprint: the same Docker application as compose.yaml, on a
+# persistent host (the scenario feeder must outlive the /feed request, which
+# Vercel Functions do not allow). See docs/PRODUCTION.md "Render".
+services:
+  - type: web
+    name: sync
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Free instances sleep after 15 idle minutes and lose /app/.local on every
+    # restart (feeder identities); use starter + the disk below to keep them.
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Render routes HTTPS traffic to this port.
+      - key: PORT
+        value: '3003'
+      - key: SPACETIME_URI
+        value: https://maincloud.spacetimedb.com
+      # The published database the dashboard reads and the feeder writes.
+      - key: SPACETIMEDB_DATABASE
+        sync: false
+      # Operator access code for Run/Stop, generated once by Render.
+      - key: SYNC_RUNNER_TOKEN
+        generateValue: true
+      # Optional: enables the LLM planner. Server-only, never sent to browsers.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # SYNC_RUNNER_ORIGIN is optional here: it defaults to the service's own
+      # https://<name>.onrender.com address (RENDER_EXTERNAL_URL). Set it only
+      # for a custom domain.
+    # Uncomment with a paid plan to keep feeder identities across deploys.
+    # disk:
+    #   name: sync-state
+    #   mountPath: /app/.local
+    #   sizeGB: 1
