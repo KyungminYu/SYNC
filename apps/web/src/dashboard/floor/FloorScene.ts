@@ -39,6 +39,11 @@ export interface FloorInput {
 const HALF = TILE_PX / 2;
 /** Catch-up speed on screen, grid units per wall second (normal walks are ~2). */
 const GLIDE_SPEED = 10;
+/**
+ * Staff catch-up speed: a helper reaches another slot within a fraction of
+ * a second, so a slot never looks like it works while its person walks.
+ */
+const STAFF_GLIDE_SPEED = 30;
 /** Feet sit this far below a person's lane position (sprites are drawn bottom-anchored). */
 const FEET = 14;
 /** Wood planks for the staff area (the Kenney packs have no wooden floor tile). */
@@ -295,13 +300,15 @@ export class FloorScene extends Phaser.Scene {
   private glide(scene: FloorState, dt: number): FloorState {
     const first = this.shown.size === 0;
     const door = { x: scene.lanes.door.x, y: scene.lanes.door.y - 0.3 };
-    const step = GLIDE_SPEED * Math.min(dt, 0.25);
+    const dtCapped = Math.min(dt, 0.25);
     const seen = new Set<string>();
     const move = <T extends { x: number; y: number; facing: Facing }>(
       key: string,
       p: T,
       spawn?: { x: number; y: number },
+      speed = GLIDE_SPEED,
     ): T => {
+      const step = speed * dtCapped;
       seen.add(key);
       const from = this.shown.get(key) ?? (first || !spawn ? p : spawn);
       const dx = p.x - from.x;
@@ -320,7 +327,9 @@ export class FloorScene extends Phaser.Scene {
       // Customers show the walk cycle while hurrying; staff have no walk flag.
       return { ...p, ...at, facing, ...('walking' in p ? { walking: true } : {}) };
     };
-    const agents = scene.agents.map((a) => move(`a:${a.id}`, a));
+    const agents = scene.agents.map((a) =>
+      move(`a:${a.id}`, a, undefined, STAFF_GLIDE_SPEED),
+    );
     const customers = scene.customers.map((cu) => move(`c:${cu.id}`, cu, door));
     // Forget people who left, so a returning id starts fresh at the door.
     for (const key of this.shown.keys()) if (!seen.has(key)) this.shown.delete(key);
