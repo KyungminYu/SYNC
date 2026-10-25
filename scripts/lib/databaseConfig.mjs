@@ -23,13 +23,20 @@ export function databaseConfig(mode = 'development') {
     }
   layers.push(process.env);
   for (const env of layers) {
+    // Also the *_HOST / *_DB_NAME names (as in the hosting dashboards' env).
     uri =
       env.VITE_SPACETIMEDB_URI ??
+      env.VITE_SPACETIMEDB_HOST ??
       env.SPACETIMEDB_URI ??
+      env.SPACETIMEDB_HOST ??
       env.SPACETIME_URI ??
       uri;
     database =
-      env.VITE_SPACETIMEDB_DATABASE ?? env.SPACETIMEDB_DATABASE ?? database;
+      env.VITE_SPACETIMEDB_DATABASE ??
+      env.VITE_SPACETIMEDB_DB_NAME ??
+      env.SPACETIMEDB_DATABASE ??
+      env.SPACETIMEDB_DB_NAME ??
+      database;
   }
   let url;
   try {

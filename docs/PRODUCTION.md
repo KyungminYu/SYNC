@@ -24,6 +24,9 @@ ANTHROPIC_API_KEY=<optional server-only key for the LLM planner>
 ```
 
 For a local deployment, set SYNC_RUNNER_ORIGIN to `http://localhost:3003`.
+Copied homepage URLs with a trailing slash are accepted and normalized. Startup
+errors identify the origin or token setting separately. The operator token must
+contain at least 32 characters without leading or trailing whitespace.
 For a hosted deployment use the exact HTTPS origin (without a trailing slash or
 path) where users access this container. A Vercel frontend hostname does not
 route requests into your Docker container simply by setting an environment variable.

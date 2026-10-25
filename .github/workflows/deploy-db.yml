@@ -1,0 +1,60 @@
+# Publishes the SpacetimeDB module (spacetimedb/) when it changes on main.
+# The web dashboard is deployed separately (Vercel).
+#
+# Runs only in a repository that configures it (same names as .env.local):
+#   variable SPACETIMEDB_DB_NAME  database name, e.g. sync-16o06
+#   variable SPACETIMEDB_HOST     optional, default https://maincloud.spacetimedb.com
+#   secret   SPACETIMEDB_TOKEN    login token of the database owner
+# Never deletes data: a change that would need it fails instead (publish by hand).
+name: Deploy SpacetimeDB module
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'spacetimedb/**'
+      - '.github/workflows/deploy-db.yml'
+  workflow_dispatch:
+
+# One publish at a time; a newer push waits for the running one.
+concurrency:
+  group: deploy-db
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ vars.SPACETIMEDB_DB_NAME != '' }}
+    runs-on: ubuntu-latest
+    env:
+      SPACETIME_VERSION: 2.13.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Engine tests
+        run: pnpm test:domain
+
+      - name: Install SpacetimeDB CLI
+        run: |
+          curl -sSf https://install.spacetimedb.com | sh -s -- --yes
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/spacetime" version install "$SPACETIME_VERSION"
+          "$HOME/.local/bin/spacetime" version use "$SPACETIME_VERSION"
+
+      - name: Publish
+        env:
+          SPACETIMEDB_TOKEN: ${{ secrets.SPACETIMEDB_TOKEN }}
+          DATABASE: ${{ vars.SPACETIMEDB_DB_NAME }}
+          SERVER: ${{ vars.SPACETIMEDB_HOST || 'https://maincloud.spacetimedb.com' }}
+        run: |
+          spacetime login --token "$SPACETIMEDB_TOKEN"
+          spacetime publish "$DATABASE" --server "$SERVER" \
+            --module-path spacetimedb --yes --delete-data=never

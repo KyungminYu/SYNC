@@ -10,7 +10,7 @@ it('protects mutations and restricts cross-origin requests without starting a fe
   const runner = createRunnerServer(
     { uri: 'http://127.0.0.1:3000', database: 'test' },
     token,
-    'https://sync.example',
+    'https://sync.example/',
   );
   await new Promise<void>((resolve) =>
     runner.server.listen(0, '127.0.0.1', resolve),
@@ -50,6 +50,23 @@ it('protects mutations and restricts cross-origin requests without starting a fe
     ).toBe(400);
   } finally {
     runner.close();
+  }
+});
+
+it('identifies the invalid setting without including credential values', () => {
+  const config = { uri: 'https://db.example', database: 'test' };
+  expect(() =>
+    createRunnerServer(config, 'x'.repeat(31), 'https://sync.example/'),
+  ).toThrow(/SYNC_RUNNER_TOKEN/);
+  for (const origin of [
+    'not-a-url',
+    'https://sync.example/path',
+    'https://user:password@sync.example',
+    'https://sync.example/?a=1',
+  ]) {
+    expect(() => createRunnerServer(config, 'x'.repeat(32), origin)).toThrow(
+      /SYNC_RUNNER_ORIGIN/,
+    );
   }
 });
 

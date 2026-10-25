@@ -11,10 +11,29 @@ export function createRunnerServer(
   origin: string,
   options: { webRoot?: string } = {},
 ) {
-  if (token.length < 32 || !/^https?:\/\/[^/]+$/.test(origin))
+  if (token.length < 32 || token !== token.trim())
     throw new Error(
-      'Set SYNC_RUNNER_TOKEN (32+ characters) and SYNC_RUNNER_ORIGIN (exact dashboard origin).',
+      'SYNC_RUNNER_TOKEN must contain at least 32 characters without surrounding whitespace.',
     );
+  // A copied homepage URL commonly has a trailing slash. Normalize it to
+  // the browser's Origin header, while rejecting paths and credentials.
+  try {
+    const parsed = new URL(origin.trim());
+    if (
+      !['http:', 'https:'].includes(parsed.protocol) ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== '/' ||
+      parsed.search ||
+      parsed.hash
+    )
+      throw new Error();
+    origin = parsed.origin;
+  } catch {
+    throw new Error(
+      'SYNC_RUNNER_ORIGIN must be an HTTP(S) origin such as https://your-app.example, without a path, query, or credentials. A trailing slash is accepted.',
+    );
+  }
   const feeder = createFeederHandler({ ...config, publicStatus: true });
   const webRoot = resolve(
     options.webRoot ?? resolve(repoRoot, 'apps/web/dist'),
