@@ -36,6 +36,8 @@ export interface ScenarioOption {
   disabled?: boolean;
   /** What Run plays for this entry: the fixed scenario and its SYNC planner. */
   run?: { scenario: string; planner: 'algorithm' | 'llm' };
+  /** Higher = more recently started (picks the latest of several entries). */
+  recency?: number;
 }
 
 /** Everything the source has delivered so far. Immutable: a new object per change. */
