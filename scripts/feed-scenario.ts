@@ -54,10 +54,11 @@ function flag(name: string, fallback: string) {
 const SEED = 5;
 const trays = Number(flag('trays', '12'));
 /** Wall-clock ms per tick: 200 ms = 5× real time (same as the engine clock). */
-// Global clock: one scenario second per 2 s of wall time. The engine needs
-// ~1.2 s per tick on average and more when customers bunch up, so it keeps
-// up; 180 ticks take about 6 minutes.
-const tickMs = Number(flag('ms', '2000'));
+// Global clock: one scenario second per 200 ms of wall time. A scenario then
+// finishes in about a minute, within hosts that cap how long a request's
+// work may run (the engine takes ~0.2 s per tick on maincloud; a late tick
+// is caught up at once). Use --ms 2000 for a slower live demo.
+const tickMs = Number(flag('ms', '200'));
 const config = databaseConfig();
 const uri = flag('uri', config.uri);
 const database = flag('db', config.database);

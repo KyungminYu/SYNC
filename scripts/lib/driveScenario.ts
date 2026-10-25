@@ -29,7 +29,7 @@ export interface DriveOptions {
   /**
    * Global clock: wall-clock ms per tick (one scenario second). Tick n is due
    * at start + n × tickMs; a late tick is caught up at once, so time never
-   * drifts. Default 2000 (the engine needs ~1.2 s per tick, more when busy).
+   * drifts. Default 200 (the engine needs ~0.2 s per tick on maincloud).
    */
   tickMs?: number;
   /** Called once with the global clock (start epoch ms, ms per tick) for viewers. */
@@ -181,7 +181,7 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
   // The global clock all viewers follow: tick n is due at startedAt + n × tickMs.
   // It starts once the first tick is written (see the loop), so the shop is
   // already moving when viewers start following it.
-  const tickMs = o.tickMs ?? 2000;
+  const tickMs = o.tickMs ?? 200;
   let startedAt = 0;
   for (let tick = 0; !signal?.aborted; tick++) {
     timing.begin();
