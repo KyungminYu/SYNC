@@ -4,8 +4,15 @@ export const REWARD_WEIGHTS = Object.freeze({
   waitPerTick: 0.001,
   executionPerDollar: 1,
   cancelledAttempt: 0.1,
-  activeWorkerTick: 0.0001,
-  planningPerMs: 0.00001,
+  // Staff time, the same for every worker on shift. Pay scale: a run (180
+  // ticks) is one hour of rush, one completed order is a $4.20 drink, and a
+  // part-time worker earns $15.00/h (BLS May 2025 median, fast food and
+  // counter workers): 15 / 180 / 4.2 ≈ 0.02 per tick.
+  activeWorkerTick: 0.02,
+  // Manager (the LLM planner), paid only while it talks: reported planning
+  // time at $33.36/h (BLS May 2025 median, food service managers), 2.22× a
+  // worker, i.e. 0.044 per second (1 tick = 1 s of wall time).
+  planningPerMs: 0.000044,
 });
 /** Terminal cart value only. Intermediate preparation never earns completed reward. */
 export function evaluateRun(

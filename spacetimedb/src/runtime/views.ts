@@ -500,7 +500,7 @@ export const ui_metrics = db.view(
       const coordination = s.telemetry.filter(
         (t) => t.source === 'coordinator',
       );
-      // The score counts reported coordination (planning) time as delta * C_coord.
+      // The score pays reported coordination (LLM planning) time a manager's wage.
       const score = evaluateRun(
         s,
         s.run.tick,

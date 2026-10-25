@@ -1,12 +1,29 @@
 import type { State } from './model.ts';
 import { readPolicy } from './model.ts';
+import {
+  DEFAULT_POLICY_CONFIG,
+  STAFFED_ROLES,
+  type StaffedRole,
+} from '../policies/scheduler.ts';
 import { emit } from './engine.ts';
-/** Staffing is separate from station capacity. Busy and uncertain workers drain safely. */
-export function adaptStaffing(s: State): void {
-  for (const role of ['cashier', 'barista', 'server'] as const) {
-    const slots = s.workers
-      .filter((w) => w.role === role)
-      .sort((a, b) => (a.id < b.id ? -1 : 1));
+/**
+ * Staffing for this tick: an external target when the policy sets one,
+ * otherwise the adaptive rule when it is on. Busy and uncertain workers
+ * drain safely (a worker being dropped finishes the task in hand).
+ */
+export function applyStaffing(s: State): void {
+  const config = readPolicy(s);
+  if (config.staffTarget) return staffTo(s, config.staffTarget);
+  if (config.adaptiveStaffing)
+    adaptStaffing(
+      s,
+      config.staffingThreshold ?? DEFAULT_POLICY_CONFIG.staffingThreshold,
+    );
+}
+/** Second worker of each role on when its upcoming work reaches `threshold`. */
+export function adaptStaffing(s: State, threshold: number): void {
+  const wanted: Partial<Record<StaffedRole, 1 | 2>> = {};
+  for (const role of STAFFED_ROLES) {
     const pending = s.tasks.filter(
       (t) => t.role === role && ['ready', 'blocked'].includes(t.status),
     );
@@ -23,16 +40,23 @@ export function adaptStaffing(s: State): void {
           );
         }),
     );
-    const second = slots[1];
+    wanted[role] = upcoming.length >= threshold ? 2 : 1;
+  }
+  staffTo(s, wanted);
+}
+/** Switches each role's second worker on or (once idle) off. */
+function staffTo(s: State, target: Partial<Record<StaffedRole, 1 | 2>>): void {
+  for (const role of STAFFED_ROLES) {
+    const second = s.workers
+      .filter((w) => w.role === role)
+      .sort((a, b) => (a.id < b.id ? -1 : 1))[1];
     if (!second) continue;
-    // γ (execution cost weight) raises the queue needed to add a second worker.
-    const threshold = 2 + Math.round(2 * (readPolicy(s).executionWeight ?? 0));
-    const wanted = upcoming.length >= threshold;
-    if (wanted && !second.enabled) {
+    const want = (target[role] ?? 1) === 2;
+    if (want && !second.enabled) {
       second.enabled = true;
       emit(s, 'worker_activated', role, { workerId: second.id });
     }
-    if (!wanted && second.enabled && second.currentTaskId === undefined) {
+    if (!want && second.enabled && second.currentTaskId === undefined) {
       second.enabled = false;
       emit(s, 'worker_deactivated', role, { workerId: second.id });
     }

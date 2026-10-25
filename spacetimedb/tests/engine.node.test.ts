@@ -745,8 +745,8 @@ test('planning weights β, γ, δ are policy fields with safe defaults and bound
   setPolicy(s, OWNER, { policy: 'primal_dual' });
   const read = () => JSON.parse(s.run.policyJson);
   assert.equal(read().deadlineWeight, 0.1);
-  assert.equal(read().executionWeight, 0);
-  assert.equal(read().coordinationWeight, 0);
+  assert.equal(read().executionWeight, 0.3);
+  assert.equal(read().coordinationWeight, 3);
   setPolicy(s, OWNER, {
     deadlineWeight: 1.5,
     executionWeight: 0.4,
@@ -801,4 +801,18 @@ test('SYNC (primal_dual) gives each task to its own role while that worker is fr
     const w = s.workers.find((x) => x.id === t.workerId)!;
     assert.equal(w.role, t.role, `${t.kind} done by ${w.label}`);
   }
+});
+
+test('the manager (LLM) is paid only for the time it talks', async () => {
+  const { evaluateRun, REWARD_WEIGHTS } = await import('../src/domain/reward.ts');
+  const owner = { identityHex: 'manager' };
+  const s = createState(1n, owner.identityHex, 'm', 5, 12, 'deterministic');
+  s.run.tick = 100;
+  const silent = evaluateRun(s, 180),
+    talked = evaluateRun(s, 180, undefined, 2000);
+  // Two seconds of API calls cost two seconds of a manager's wage.
+  assert.ok(
+    Math.abs(talked.penalty - silent.penalty - 2000 * REWARD_WEIGHTS.planningPerMs) < 1e-9,
+  );
+  assert.ok(Math.abs(REWARD_WEIGHTS.planningPerMs * 1000 - 2.22 * REWARD_WEIGHTS.activeWorkerTick) < 0.001);
 });
