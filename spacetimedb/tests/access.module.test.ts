@@ -1,6 +1,6 @@
 /** Requires the real SpacetimeDB SDK test harness; not a substitute for subscriptions. */
 import { expect, it } from 'vitest';
-import { ConnectionId } from 'spacetimedb';
+import { ConnectionId, ScheduleAt } from 'spacetimedb';
 import {
   createModuleTestHarness,
   TestAuth,
@@ -12,6 +12,47 @@ const principal = (sub: string, n: bigint) =>
     JSON.stringify({ iss: 'sync-test', sub }),
     new ConnectionId(n),
   );
+it('arms clocks only for running runs, ignores old deliveries, and retires legacy paused clocks', () => {
+  const test = createModuleTestHarness(schema, api);
+  const owner = principal('clock-owner', 50n);
+  test.withReducerTx(owner, (ctx) =>
+    api.create_run(ctx, {
+      name: 'Clock lifecycle',
+      seed: 1,
+      trayCount: 1,
+      mode: 'deterministic',
+      budgetMicrousd: undefined,
+    }),
+  );
+  const runId = api.ui_runs(test.viewContext(owner))[0]!.id;
+  test.withReducerTx(owner, (ctx) => {
+    expect(ctx.db.clock.runId.find(runId)).toBeFalsy();
+    api.set_run_status(ctx, { runId, running: true });
+    const first = ctx.db.clock.runId.find(runId)!;
+    expect(first).toBeDefined();
+    api.set_run_status(ctx, { runId, running: true });
+    expect(ctx.db.clock.runId.find(runId)?.scheduledId).toBe(first.scheduledId);
+    api.set_run_status(ctx, { runId, running: false });
+    expect(ctx.db.clock.runId.find(runId)).toBeFalsy();
+    api.set_run_status(ctx, { runId, running: true });
+    const resumed = ctx.db.clock.runId.find(runId)!;
+    expect(resumed.scheduledId).not.toBe(first.scheduledId);
+    const tick = ctx.db.run.id.find(runId)!.tick;
+    api.tick_run(ctx, { arg: first });
+    expect(ctx.db.run.id.find(runId)!.tick).toBe(tick);
+    api.tick_run(ctx, { arg: resumed });
+    expect(ctx.db.run.id.find(runId)!.tick).toBe(tick + 1);
+    api.set_run_status(ctx, { runId, running: false });
+    const legacy = ctx.db.clock.insert({
+      scheduledId: 0n,
+      scheduledAt: ScheduleAt.interval(200000n),
+      runId,
+    });
+    api.tick_run(ctx, { arg: legacy });
+    expect(ctx.db.clock.runId.find(runId)).toBeFalsy();
+    expect(ctx.db.run.id.find(runId)!.tick).toBe(tick + 1);
+  });
+});
 it('keeps UI views empty for another identity and exposes a complete DAG to the owner', () => {
   const test = createModuleTestHarness(schema, api);
   const alice = principal('alice', 1n);
