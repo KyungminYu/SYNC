@@ -28,6 +28,12 @@ function memoryPort(states: State[]) {
             .filter((r) => r.ownerIdentityHex === hex)
             .map((r) => structuredClone(r)),
       },
+      status: {
+        filter: (status: string) =>
+          [...runRows.values()]
+            .filter((r) => r.status === status)
+            .map((r) => structuredClone(r)),
+      },
     },
   };
   for (const name of STATE_TABLES) {
@@ -144,6 +150,20 @@ test('indexed readable runs enforce owner/viewer/operator isolation and exclude 
     [1n],
   );
   assert.deepEqual(serviceRuns(store, 'alice'), []);
+});
+test('completed runs are readable by every identity, unfinished ones stay private', () => {
+  const done = fresh(),
+    open = createState(2n, 'bob', 'Bob', 1, 1, 'deterministic');
+  done.run.status = 'completed';
+  const { store } = memoryPort([done, open]);
+  assert.deepEqual(
+    readableRuns(store, 'stranger').map((r) => r.id),
+    [1n],
+  );
+  assert.deepEqual(
+    readableRuns(store, 'bob').map((r) => r.id),
+    [1n, 2n],
+  );
 });
 test('revoked membership immediately stops readable-run access', () => {
   const s = fresh();
