@@ -123,6 +123,11 @@ export function save(store: MutableDb, state: State): void {
   saveTable(store.telemetry, state.telemetry, state.run.id);
 }
 export type ViewDb = ReadDb & {
+  run: ReadDb['run'] & {
+    status: {
+      filter(status: string): Iterable<Run>;
+    };
+  };
   members: ReadTable<State['members'][number]> & {
     identityHex: {
       filter(hex: string): Iterable<State['members'][number]>;
@@ -131,6 +136,9 @@ export type ViewDb = ReadDb & {
 };
 export function readableRuns(store: ViewDb, identityHex: string): Run[] {
   const map = new Map<bigint, Run>();
+  // Finished runs are public results: any dashboard identity can read them
+  // (control stays with the owner and operators).
+  for (const r of store.run.status.filter('completed')) map.set(r.id, r);
   for (const r of store.run.ownerIdentityHex.filter(identityHex))
     map.set(r.id, r);
   for (const m of store.members.identityHex.filter(identityHex)) {

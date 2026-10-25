@@ -143,9 +143,18 @@ it('executes a complete reducer lifecycle and releases reservations', () => {
   expect(
     api.ui_planner(test.viewContext(alice))[0]!.replan_count,
   ).toBeGreaterThan(0n);
-  expect(api.ui_planner(test.viewContext(principal('outsider', 3n)))).toEqual(
-    [],
+  // A completed run is a public result: readable by anyone, controlled by no outsider.
+  const outsider = principal('outsider', 3n);
+  const seen = api.ui_runs(test.viewContext(outsider));
+  expect(seen.map((r) => [r.id, r.can_control])).toEqual([[runId, false]]);
+  expect(api.ui_metrics(test.viewContext(outsider))[0]!.delivered_orders).toBe(
+    1,
   );
+  expect(() =>
+    test.withReducerTx(outsider, (ctx) =>
+      api.set_run_status(ctx, { runId, running: true }),
+    ),
+  ).toThrow();
 });
 it('rolls back previously successful writes in a failed transaction', () => {
   const test = createModuleTestHarness(schema, api);

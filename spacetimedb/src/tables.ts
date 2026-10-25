@@ -8,7 +8,8 @@ export const run = table(
     name: t.string(),
     seed: t.u32(),
     tick: t.u32(),
-    status: t.string(),
+    // Indexed: completed runs are readable by every identity (views).
+    status: t.string().index('btree'),
     arrivalsClosed: t.bool(),
     mode: t.string(),
     version: t.u64(),
