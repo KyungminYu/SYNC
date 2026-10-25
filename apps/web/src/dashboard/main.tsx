@@ -28,9 +28,14 @@ const SEED = 5;
 
 /**
  * Starts scenarios from the dashboard: the dev server runs the test feeder.
- * Not available in a production build (no start buttons there).
+ * Production uses a separately hosted persistent runner when configured.
  */
-const runner = import.meta.env.DEV ? new DevFeederRunner() : undefined;
+const runnerUrl = import.meta.env.VITE_SYNC_RUNNER_URL?.trim();
+const runner = runnerUrl
+  ? new DevFeederRunner(runnerUrl, true)
+  : import.meta.env.DEV
+    ? new DevFeederRunner()
+    : undefined;
 
 /** Source for a toggle position. */
 function sourceFor(mode: DashboardMode): SyncSource {

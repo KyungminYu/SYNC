@@ -4,6 +4,7 @@ SYNC coordinates finite worker, station and reusable-resource capacity through a
 
 - [Cart decomposition, external workers, cancellation and benchmarking](docs/CART_EXECUTION.md)
 - [Maincloud publication and environment repair](docs/LIVE_SCENARIO_REPAIR.md)
+- [Vercel deployment and persistent scenario runner](docs/PRODUCTION.md)
 - [Primal-dual planner](docs/PRIMAL_DUAL.md)
 
 ## Setup

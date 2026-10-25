@@ -7,6 +7,7 @@ export default defineConfig({
       'packages/**/*.test.ts',
       'spacetimedb/tests/*.module.test.ts',
       'apps/**/*.test.{ts,tsx}',
+      'scripts/lib/runnerServer.test.ts',
     ],
     environment: 'node',
   },

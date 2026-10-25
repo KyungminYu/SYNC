@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Decision, Policy } from '../sync/contract';
 import type { Planner, RunnerClock, ScenarioRunner } from '../sync/runner';
 import type { ScenarioOption, SyncSource } from '../sync/source';
+import { SCENARIOS } from '../sync/scenarioCatalog';
 import { DecisionsPanel } from './components/DecisionsPanel';
 import { PlannerSwitch } from './components/PlannerSwitch';
 import { ScenarioPicker } from './components/ScenarioPicker';
@@ -234,7 +235,7 @@ export function Dashboard({
     <div className="dashboard">
       <TopBar
         run={
-          scenarios?.length || runner ? (
+          scenarios?.length || runner || mode === 'live' ? (
             <div className="run-controls">
               <ScenarioPicker
                 options={
@@ -257,7 +258,14 @@ export function Dashboard({
                           // Runs outside the fixed scenarios (external workers).
                           (scenarios ?? []).filter((s) => !s.run),
                         )
-                    : (scenarios ?? [])
+                    : scenarios?.length
+                      ? scenarios
+                      : SCENARIOS.map((s) => ({
+                          id: s.id,
+                          label: s.id,
+                          group: s.load,
+                          disabled: true,
+                        }))
                 }
                 value={
                   runner
@@ -290,13 +298,23 @@ export function Dashboard({
                 onStop={stopRunner}
                 footnote={
                   runner
-                    ? 'Run plays Baseline + SYNC on the engine via the local feeder and follows it. Same customers (seed 5); scenarios differ by customers and drinks per order.'
-                    : undefined
+                    ? 'Run plays Baseline + SYNC on the engine via the runner service and follows it. Same customers (seed 5); scenarios differ by customers and drinks per order.'
+                    : mode === 'live'
+                      ? 'Viewing only. Connect a runner service to start scenarios.'
+                      : undefined
                 }
               />
-              {runner?.llmAvailable && (
+              {(runner?.llmAvailable || mode === 'live') && (
                 <PlannerSwitch
-                  value={llmOk ? planner : 'algorithm'}
+                  available={!!runner}
+                  value={
+                    runner
+                      ? llmOk
+                        ? planner
+                        : 'algorithm'
+                      : (scenarios?.find((s) => s.id === scenarioId)?.run
+                          ?.planner ?? 'algorithm')
+                  }
                   llmAvailable={llmOk}
                   onChange={pickPlanner}
                 />

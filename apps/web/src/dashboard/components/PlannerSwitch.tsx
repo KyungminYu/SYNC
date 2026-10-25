@@ -9,7 +9,9 @@ export function PlannerSwitch({
   value,
   llmAvailable,
   onChange,
+  available = true,
 }: {
+  available?: boolean;
   value: Planner;
   llmAvailable: boolean;
   onChange(p: Planner): void;
@@ -19,6 +21,7 @@ export function PlannerSwitch({
       <span className="planner-label">SYNC planner</span>
       <div className="segmented" role="group" aria-label="SYNC planner">
         <button
+          disabled={!available}
           aria-pressed={value === 'algorithm'}
           onClick={() => onChange('algorithm')}
         >
@@ -26,19 +29,23 @@ export function PlannerSwitch({
         </button>
         <button
           aria-pressed={value === 'llm'}
-          disabled={!llmAvailable}
+          disabled={!available || !llmAvailable}
           title={
             llmAvailable
               ? 'Claude tunes the planner weights β, γ, δ every 10–30 ticks'
-              : 'Add ANTHROPIC_API_KEY to the repo root .env.local'
+              : 'The runner service must have an Anthropic API key configured'
           }
           onClick={() => onChange('llm')}
         >
           LLM · Claude
         </button>
       </div>
-      {!llmAvailable && (
-        <span className="planner-hint">needs ANTHROPIC_API_KEY</span>
+      {(!available || !llmAvailable) && (
+        <span className="planner-hint">
+          {available
+            ? 'LLM unavailable on runner'
+            : 'Viewing only: runner not configured'}
+        </span>
       )}
     </div>
   );

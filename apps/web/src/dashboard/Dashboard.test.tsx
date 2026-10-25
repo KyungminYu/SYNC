@@ -70,13 +70,34 @@ function fakeLive(snapshot: SyncSnapshot): SyncSource {
   };
 }
 
+it('keeps production controls visible with an explicit viewing-only state when no runner is configured', () => {
+  render(
+    <Dashboard
+      mode="live"
+      source={fakeLive({ status: { kind: 'ready' }, runs: {} })}
+    />,
+  );
+  expect(screen.getByText('Viewing only: runner not configured')).toBeTruthy();
+  expect(
+    (screen.getByRole('button', { name: 'Algorithm' }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (screen.getByRole('button', { name: 'LLM · Claude' }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+});
+
 it('live without visible runs shows who to grant and the feeder command', () => {
   render(
     <Dashboard
       source={fakeLive({
         status: { kind: 'ready' },
         runs: {},
-        emptyHint: { message: 'Connected as abc…', command: 'pnpm feed --viewer abc' },
+        emptyHint: {
+          message: 'Connected as abc…',
+          command: 'pnpm feed --viewer abc',
+        },
       })}
     />,
   );
@@ -92,23 +113,34 @@ it('live without visible runs shows who to grant and the feeder command', () => 
 });
 
 it('no run and no hint still shows the default layout with the empty banner', () => {
-  render(<Dashboard source={fakeLive({ status: { kind: 'ready' }, runs: {} })} />);
+  render(
+    <Dashboard source={fakeLive({ status: { kind: 'ready' }, runs: {} })} />,
+  );
   expect(screen.getByRole('note').textContent).toMatch(/^NO RUN/);
   expect(screen.getByLabelText('Baseline shop floor')).toBeTruthy();
   expect(screen.queryByText('Not measured')).toBeNull();
 });
 
 it('live runs hide playback controls and the seed comparison', async () => {
-  const mock = new MockSyncSource({ seed: 5, delivery: 'replay', latencyMs: 0 });
+  const mock = new MockSyncSource({
+    seed: 5,
+    delivery: 'replay',
+    latencyMs: 0,
+  });
   mock.connect();
   await vi.waitFor(() => expect(mock.getSnapshot().status.kind).toBe('ready'));
   // A live run that is still running: time comes from the database.
-  const running = (r?: RunData) => r && { ...r, run: { ...r.run, status: 'running' as const } };
+  const running = (r?: RunData) =>
+    r && { ...r, run: { ...r.run, status: 'running' as const } };
   const { baseline, sync } = mock.getSnapshot().runs;
   const runs = { baseline: running(baseline), sync: running(sync) };
   render(
     <Dashboard
-      source={fakeLive({ status: { kind: 'ready' }, runs, note: 'Driven by the feeder · tick 12' })}
+      source={fakeLive({
+        status: { kind: 'ready' },
+        runs,
+        note: 'Driven by the feeder · tick 12',
+      })}
     />,
   );
   expect(screen.getByText('Driven by the feeder · tick 12')).toBeTruthy();

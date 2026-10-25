@@ -7,6 +7,33 @@ import { SCENARIOS } from '../scenarioCatalog';
  * fixed scenario. The feeder process writes to SpacetimeDB; nothing here does.
  */
 export class DevFeederRunner implements ScenarioRunner {
+  private accessCode: string | undefined;
+  constructor(
+    private readonly endpoint = '/__dev/feed',
+    private readonly remote = false,
+  ) {}
+
+  private async request(init: RequestInit = {}) {
+    const mutation = init.method === 'POST' || init.method === 'DELETE';
+    if (this.remote && mutation && !this.accessCode) {
+      this.accessCode = window.prompt('Runner operator access code')?.trim();
+      if (!this.accessCode)
+        throw new Error('A runner operator access code is required.');
+    }
+    const response = await fetch(this.endpoint, {
+      ...init,
+      signal: init.signal ?? AbortSignal.timeout(10000),
+      headers: {
+        ...init.headers,
+        ...(this.remote && mutation
+          ? { authorization: `Bearer ${this.accessCode}` }
+          : {}),
+      },
+    });
+    if (response.status === 401) this.accessCode = undefined;
+    return response;
+  }
+
   readonly scenarios = SCENARIOS.map((s) => ({
     id: s.id,
     label: s.id,
@@ -15,7 +42,7 @@ export class DevFeederRunner implements ScenarioRunner {
   }));
 
   async start(id: string, viewer: string, planner: Planner = 'algorithm') {
-    const res = await fetch('/__dev/feed', {
+    const res = await this.request({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ scenario: id, viewer, planner }),
@@ -27,13 +54,13 @@ export class DevFeederRunner implements ScenarioRunner {
     const { jobId } = (await res.json()) as { jobId: number };
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      const statusResponse = await fetch('/__dev/feed', {
+      const statusResponse = await this.request({
         cache: 'no-store',
         signal: AbortSignal.timeout(10000),
       });
       if (!statusResponse.ok)
         throw new Error(
-          'Cannot read scenario status. Check the development server.',
+          'Cannot read scenario status. Check the runner service.',
         );
       const status = (await statusResponse.json()) as {
         jobId: number;
@@ -54,7 +81,7 @@ export class DevFeederRunner implements ScenarioRunner {
   }
 
   async clock(): Promise<RunnerClock | undefined> {
-    const res = await fetch('/__dev/feed', { cache: 'no-store' });
+    const res = await this.request({ cache: 'no-store' });
     if (!res.ok) return undefined;
     const s = (await res.json()) as {
       state: string;
@@ -67,13 +94,13 @@ export class DevFeederRunner implements ScenarioRunner {
   }
 
   async llmAvailable() {
-    const res = await fetch('/__dev/feed', { cache: 'no-store' });
+    const res = await this.request({ cache: 'no-store' });
     if (!res.ok) return false;
     return !!((await res.json()) as { llmAvailable?: boolean }).llmAvailable;
   }
 
   async stop() {
-    const res = await fetch('/__dev/feed', { method: 'DELETE' });
+    const res = await this.request({ method: 'DELETE' });
     if (!res.ok) throw new Error(`Stop request failed (${res.status}).`);
   }
 }
