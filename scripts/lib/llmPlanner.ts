@@ -20,8 +20,9 @@ import type { DbConnection } from '../../packages/bindings/src';
  *   improves across runs instead of during one;
  * - at most MAX_CORRECTIONS more, only when orders fall at risk;
  * - numbers in, three numbers out, on a short system prompt;
- * - answers cached on disk by request: the same scenario history or the same
- *   (bucketed) situation never calls the API twice.
+ * - answers cached in memory by request (persisted to disk for later runs):
+ *   the same scenario history or the same (bucketed) situation never calls
+ *   the API twice.
  * Requests never block a tick. Each API call is reported through
  * `report_usage` (source "coordinator") as planning time.
  */
@@ -43,7 +44,7 @@ const RANGE = { b: [0, 2], g: [0, 1], d: [0, 2] } as const;
 const CACHE_FILE = '.local/llm-planner-cache.json';
 const HISTORY_FILE = '.local/llm-planner-history.json';
 
-const SYSTEM = `Tune a coffee-shop scheduler. Weights: b in [0,2] lateness penalty (default 0.1); g in [0,1] execution-cost penalty, higher adds extra staff less eagerly (default 0); d in [0,2] coordination cost, higher plans more coarsely (default 0). Goal: maximize the final objective (completed orders minus lateness, waiting, cost and staff time). Reply with b, g, d only.`;
+const SYSTEM = `Tune a coffee-shop scheduler. Weights: b in [0,2] lateness penalty (default 0.1); g in [0,1] execution-cost penalty, higher adds extra staff less eagerly (default 0); d in [0,2] coordination cost, higher plans more coarsely (default 0). Goal: maximize the final objective (completed orders minus lateness, waiting, cost and staff time). Use steps of 0.1. Reply with b, g, d only.`;
 
 const Answer = z.object({ b: z.number(), g: z.number(), d: z.number() });
 type Weights = z.infer<typeof Answer>;
@@ -76,12 +77,28 @@ const writeJson = (file: string, value: unknown) => {
   mkdirSync('.local', { recursive: true });
   writeFileSync(file, JSON.stringify(value, null, 1));
 };
+/** Weights snap to steps of 0.1: fewer distinct values, more repeated questions. */
 const clamp = (n: number, [lo, hi]: readonly [number, number]) =>
-  Number.isFinite(n)
-    ? Math.min(hi, Math.max(lo, Math.round(n * 100) / 100))
-    : lo;
+  Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n * 10) / 10)) : lo;
+/**
+ * Answers by request hash, in memory: filled once from the disk cache, read
+ * without touching the disk, and written through so the next feeder
+ * process (one per run) starts with every answer so far.
+ */
+let memory: Map<string, Weights> | undefined;
+const answers = () =>
+  (memory ??= new Map(
+    Object.entries(readJson<Record<string, Weights>>(CACHE_FILE, {})),
+  ));
+const remember = (key: string, w: Weights) => {
+  answers().set(key, w);
+  writeJson(CACHE_FILE, Object.fromEntries(answers()));
+};
 /** Coarse buckets so similar situations share a cache entry. */
 const bucket = (n: number) => (n <= 0 ? '0' : n <= 2 ? '1-2' : '3+');
+/** Staff load as a word instead of raw counts. */
+const load = (busy: number, active: number) =>
+  busy === 0 ? 'idle' : busy < active ? 'busy' : 'full';
 
 export interface LlmPlannerOptions {
   /** Feeder connection (run owner): sets the policy weights. */
@@ -179,16 +196,25 @@ export class LlmPlanner {
 
   /** First pick, from earlier runs of this scenario (best first). */
   private async initialPick() {
-    const past = (
-      readJson<Record<string, Past[]>>(HISTORY_FILE, {})[this.o.scenario] ?? []
-    )
-      .slice()
-      .sort((a, b) => b.objective - a.objective)
-      .slice(0, HISTORY_LIMIT);
+    // Weight sets tried on this scenario, best mean objective first. Only the
+    // order goes into the question: while it stays the same, so does the
+    // question, and the cached answer is reused (no API call).
+    const byWeights = new Map<string, number[]>();
+    for (const p of readJson<Record<string, Past[]>>(HISTORY_FILE, {})[
+      this.o.scenario
+    ] ?? []) {
+      const k = `${clamp(p.b, RANGE.b)},${clamp(p.g, RANGE.g)},${clamp(p.d, RANGE.d)}`;
+      byWeights.set(k, [...(byWeights.get(k) ?? []), p.objective]);
+    }
+    const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+    const ranked = [...byWeights]
+      .sort((a, b) => mean(b[1]) - mean(a[1]) || (a[0] < b[0] ? -1 : 1))
+      .slice(0, HISTORY_LIMIT)
+      .map(([k]) => k);
     const prompt = [
       `scenario ${this.o.scenario}, start of run`,
-      past.length
-        ? `past runs b,g,d -> objective: ${past.map((p) => `${p.b},${p.g},${p.d}->${p.objective}`).join('; ')}`
+      ranked.length
+        ? `weights tried b,g,d, best objective first: ${ranked.join('; ')}`
         : 'no past runs',
     ].join('\n');
     const w = await this.ask(prompt, 'start');
@@ -203,7 +229,7 @@ export class LlmPlanner {
     ];
     const prompt = [
       `scenario ${this.o.scenario}, ${phase} of run, now b ${this.weights.b} g ${this.weights.g} d ${this.weights.d}`,
-      `orders at risk ${bucket(atRisk)}, late open ${bucket(m?.lateOpenOrders ?? 0)}, ready tasks ${bucket(m?.readyTasks ?? 0)}, busy staff ${m?.busyWorkers ?? 0}/${m?.activeWorkers ?? 0}`,
+      `orders at risk ${bucket(atRisk)}, late open ${bucket(m?.lateOpenOrders ?? 0)}, ready tasks ${bucket(m?.readyTasks ?? 0)}, staff ${load(m?.busyWorkers ?? 0, m?.activeWorkers ?? 0)}`,
     ].join('\n');
     await this.ask(prompt, `tick ${tick}`);
   }
@@ -216,8 +242,7 @@ export class LlmPlanner {
     const key = createHash('sha256')
       .update(JSON.stringify([MODEL, SYSTEM, prompt]))
       .digest('hex');
-    const cache = readJson<Record<string, Weights>>(CACHE_FILE, {});
-    let w = cache[key];
+    let w = answers().get(key);
     if (w) this.o.log(`llm planner: ${when} cache hit`);
     else {
       const started = performance.now();
@@ -233,8 +258,7 @@ export class LlmPlanner {
         return undefined;
       }
       w = response.parsed_output;
-      cache[key] = w;
-      writeJson(CACHE_FILE, cache);
+      remember(key, w);
       const ms = performance.now() - started;
       const u = response.usage;
       const inputTokens =
