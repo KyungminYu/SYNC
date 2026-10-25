@@ -1,9 +1,46 @@
 # Production deployment
 
-SYNC has three separate runtimes: the static dashboard on Vercel, the published
-SpacetimeDB module, and persistent Node processes for scenario feeding / external
-agents. Publishing the database does not start the Node processes. The Vite
-development middleware (`/__dev/feed`) is not part of a production build.
+SYNC uses a dashboard, persistent Node processes for scenario feeding / external
+agents, and a published SpacetimeDB module. Publishing the database does not start
+the Node processes. The Vite development middleware (`/__dev/feed`) is not part
+of a production build.
+
+## One-container deployment
+
+The Docker image serves the built dashboard and authenticated `/feed` endpoint
+from one Node process. Use this when you want one application deployment instead
+of a Vercel frontend plus a separate scenario-runner host. Docker is required on
+your machine or server; SpacetimeDB remains hosted separately.
+
+Set these in the root `.env` (which is ignored by Git):
+
+```text
+SPACETIME_URI=https://maincloud.spacetimedb.com
+SPACETIMEDB_DATABASE=<the exact database published locally>
+SYNC_RUNNER_ORIGIN=https://<your-domain>
+SYNC_RUNNER_TOKEN=<random operator access code, at least 32 characters>
+ANTHROPIC_API_KEY=<server-only key, optional for the LLM planner>
+```
+
+Build and start the application from the repository root:
+
+```powershell
+docker compose up --build -d
+```
+
+The site is served on port 3003 by default. Put an HTTPS reverse proxy such as
+Caddy, nginx, or your hosting provider in front of it, and set
+`SYNC_RUNNER_ORIGIN` to the exact public origin (scheme and hostname, without a
+path). The container keeps feeder identities in a named volume, so recreating the
+container does not erase them. Back up that volume. The UI asks for the operator
+code on Run or Stop; the code and optional Anthropic key are only runtime secrets.
+To update, pull the new revision and run `docker compose up --build -d` again.
+
+This combines the dashboard and scenario feeder. If you also need external agent
+worker processes, configure and run `pnpm dev:agents` as another supervised
+service using the instructions in CART_EXECUTION.md; it requires a specific run
+ID and execution adapter, so it cannot be started meaningfully before a run is
+created.
 
 ## Vercel dashboard
 

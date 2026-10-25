@@ -1,0 +1,12 @@
+.git
+.local
+.tools
+node_modules
+**/node_modules
+apps/web/dist
+dist
+coverage
+.env
+.env.*
+!.env.example
+*.log

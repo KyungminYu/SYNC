@@ -10,15 +10,17 @@ export default defineConfig(({ mode }) => {
     loadEnv(mode, repoRoot, 'VITE_').VITE_SYNC_RUNNER_URL ??
     '';
   if (runnerUrl) {
-    const url = new URL(runnerUrl);
+    const url = runnerUrl.startsWith('/') ? undefined : new URL(runnerUrl);
     if (
-      !['https:', ...(mode === 'development' ? ['http:'] : [])].includes(
-        url.protocol,
-      ) ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash
+      (url &&
+        (!['https:', ...(mode === 'development' ? ['http:'] : [])].includes(
+          url.protocol,
+        ) ||
+          url.username ||
+          url.password ||
+          url.search ||
+          url.hash)) ||
+      runnerUrl.startsWith('//')
     )
       throw new Error(
         'VITE_SYNC_RUNNER_URL must be an HTTPS endpoint without credentials or query parameters.',

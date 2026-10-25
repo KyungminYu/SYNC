@@ -15,7 +15,7 @@ import './dashboard.css';
  * dashboard. Everything is chosen on screen (Live / Sample toggle and the
  * scenario dropdown); the URL carries no options. The dashboard only reads
  * the database; scenarios are written by scripts/feed-scenario.ts, which the
- * dev server can start for the dashboard through the ScenarioRunner port.
+ * configured runner service can start for the dashboard.
  *   Live   — (default) subscribes to SpacetimeDB and shows the picked scenario
  *            (Low-1, Mid-2, …) as it changes.
  *   Sample — the mock scenario or a finished live result saved in
@@ -27,8 +27,7 @@ import './dashboard.css';
 const SEED = 5;
 
 /**
- * Starts scenarios from the dashboard: the dev server runs the test feeder.
- * Production uses a separately hosted persistent runner when configured.
+ * Starts scenarios from the dashboard through the configured runner service.
  */
 const runnerUrl = import.meta.env.VITE_SYNC_RUNNER_URL?.trim();
 const runner = runnerUrl
