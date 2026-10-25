@@ -41,7 +41,7 @@ const TERMS: Term[] = [
     label: 'Late orders',
     hint: 'fewer is better · penalty',
     value: (s) => s.lateCount,
-    text: (s) => `${s.lateCount}`,
+    text: (s) => `${s.lateCount} of ${s.totalJobs}`,
     scale: (both) => Math.max(1, ...both.map((s) => s.totalJobs)),
   },
   {
