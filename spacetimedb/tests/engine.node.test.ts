@@ -745,8 +745,8 @@ test('planning weights β, γ, δ are policy fields with safe defaults and bound
   setPolicy(s, OWNER, { policy: 'primal_dual' });
   const read = () => JSON.parse(s.run.policyJson);
   assert.equal(read().deadlineWeight, 0.1);
-  assert.equal(read().executionWeight, 0);
-  assert.equal(read().coordinationWeight, 0);
+  assert.equal(read().executionWeight, 0.3);
+  assert.equal(read().coordinationWeight, 3);
   setPolicy(s, OWNER, {
     deadlineWeight: 1.5,
     executionWeight: 0.4,

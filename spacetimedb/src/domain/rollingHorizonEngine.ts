@@ -65,7 +65,7 @@ export class RollingHorizonEngine {
     const now = s.run.tick;
     const end = now + ROLLING_CONFIG.horizon;
     // Planning weights (β, γ, δ) from the run's policy; defaults keep the
-    // original coefficients (lateness 0.1, no extra cost term, full effort).
+    // swept coefficients (lateness 0.1, cost 0.3, 4 iterations).
     const weights = { ...DEFAULT_POLICY_CONFIG, ...readPolicy(s) };
     const iterations = Math.max(
       4,
@@ -194,8 +194,10 @@ export class RollingHorizonEngine {
               ? 20
               : 0) -
             Math.min(1, Number(task.estimatedCostMicrousd) / 1000000) -
-            (weights.executionWeight * Number(task.estimatedCostMicrousd)) /
-              1000 -
+            // γ per 1000 µUSD, capped like lateness: a costly task waits,
+            // but its age bonus (up to 15) still lets it run eventually.
+            weights.executionWeight *
+              Math.min(30, Number(task.estimatedCostMicrousd) / 1000) -
             (worker.role === task.role ? 0 : weights.helpPenalty);
           candidates.push({
             taskId: task.id,

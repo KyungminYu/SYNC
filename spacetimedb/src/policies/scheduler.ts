@@ -79,9 +79,16 @@ export interface PolicyConfig {
    * β: lateness per tick (penalty for missing deadlines).
    */
   deadlineWeight: number;
-  /** γ: modeled execution cost (per 1000 µUSD) and eagerness to add staff. */
+  /**
+   * γ: modeled execution cost per 1000 µUSD, capped at 30 units. Batched
+   * drink tasks cost their length, so γ > 0 takes short tasks a little
+   * sooner (less waiting); a costly task waits but is never starved.
+   */
   executionWeight: number;
-  /** δ: coordination cost; higher means less planning effort per tick. */
+  /**
+   * δ: coordination cost; planning runs 16 / (1 + δ) price iterations, so
+   * higher means less planning effort per tick.
+   */
   coordinationWeight: number;
   /**
    * Staffing. Each role has one worker (the four base staff) and may add a
@@ -122,9 +129,11 @@ export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   maxAgeTicks: 300,
   candidatesPerWorker: 4,
   maxBranches: 2000,
+  // Engine sweep, 9 scenarios: γ 0.3 cuts waiting slightly (+0.8 objective);
+  // δ 3 (4 price iterations) plans the same as δ 0 (16), 57% faster.
   deadlineWeight: 0.1,
-  executionWeight: 0,
-  coordinationWeight: 0,
+  executionWeight: 0.3,
+  coordinationWeight: 3,
   adaptiveStaffing: false,
   staffingThreshold: 3,
   helpPenalty: 0.5,
