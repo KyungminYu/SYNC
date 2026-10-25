@@ -31,7 +31,8 @@
     "db:describe": "node scripts/db.mjs describe",
     "benchmark": "tsx scripts/benchmark.ts",
     "agents:demo": "tsx scripts/external-demo.ts",
-    "start:runner": "tsx scripts/runner-server.ts"
+    "start:runner": "tsx scripts/runner-server.ts",
+    "start": "node --import tsx scripts/runner-server.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

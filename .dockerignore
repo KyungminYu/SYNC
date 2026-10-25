@@ -8,5 +8,8 @@ dist
 coverage
 .env
 .env.*
+**/.env
+**/.env.*
+**/.local
 !.env.example
 *.log

@@ -1,20 +1,15 @@
 FROM node:22-bookworm-slim
 WORKDIR /app
 RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY . .
 RUN pnpm install --frozen-lockfile
 
-# The database address and name are public browser settings, baked into the
-# dashboard. Secrets are supplied only when the container starts.
-ARG SPACETIME_URI
-ARG SPACETIMEDB_DATABASE
-ARG VITE_SYNC_RUNNER_URL=/feed
-ENV SPACETIME_URI=$SPACETIME_URI
-ENV SPACETIMEDB_DATABASE=$SPACETIMEDB_DATABASE
-ENV VITE_SYNC_RUNNER_URL=$VITE_SYNC_RUNNER_URL
+# Database settings and secrets are supplied only when the container starts.
+# The Node server supplies public configuration to the dashboard at runtime.
 RUN pnpm typecheck:source && pnpm build:web
 
 ENV NODE_ENV=production
+ENV PORT=3003
 EXPOSE 3003
-CMD ["pnpm", "start:runner"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3003) + '/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+CMD ["node", "--import", "tsx", "scripts/runner-server.ts"]

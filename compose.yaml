@@ -2,10 +2,6 @@ services:
   sync:
     build:
       context: .
-      args:
-        SPACETIME_URI: ${SPACETIME_URI:?Set SPACETIME_URI in .env}
-        SPACETIMEDB_DATABASE: ${SPACETIMEDB_DATABASE:?Set SPACETIMEDB_DATABASE in .env}
-        VITE_SYNC_RUNNER_URL: /feed
     ports:
       - '3003:3003'
     environment:
@@ -15,9 +11,12 @@ services:
       SYNC_RUNNER_ORIGIN: ${SYNC_RUNNER_ORIGIN:?Set SYNC_RUNNER_ORIGIN in .env}
       SYNC_RUNNER_TOKEN: ${SYNC_RUNNER_TOKEN:?Set SYNC_RUNNER_TOKEN in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SYNC_AGENT_ADAPTER: ${SYNC_AGENT_ADAPTER:-}
+      SYNC_AGENT_RUN_ID: ${SYNC_AGENT_RUN_ID:-}
     volumes:
       - sync-state:/app/.local
     restart: unless-stopped
+    init: true
 
 volumes:
   sync-state:

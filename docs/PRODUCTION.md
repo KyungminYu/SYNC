@@ -1,113 +1,110 @@
-# Production deployment
+# Production: one persistent Docker application
 
-SYNC uses a dashboard, persistent Node processes for scenario feeding / external
-agents, and a published SpacetimeDB module. Publishing the database does not start
-the Node processes. The Vite development middleware (`/__dev/feed`) is not part
-of a production build.
+The supported production deployment is a single Docker image. Its Node server
+serves the dashboard, `/feed`, `/sync-config.js`, and `/health` on the same port.
+The browser always calls the same-origin `/feed`; no RUNNER_URL or
+VITE_SYNC_RUNNER_URL setting is required. Public database settings come from the
+running container, so the same image can target different databases without a
+rebuild. Secrets never enter the browser configuration.
 
-## One-container deployment
+SpacetimeDB remains the external database configured below. Publishing its module
+is a separate release step; no database publication credentials are required by
+the application container.
 
-The Docker image serves the built dashboard and authenticated `/feed` endpoint
-from one Node process. Use this when you want one application deployment instead
-of a Vercel frontend plus a separate scenario-runner host. Docker is required on
-your machine or server; SpacetimeDB remains hosted separately.
+## Build and run
 
-Set these in the root `.env` (which is ignored by Git):
+Set these in the root Git-ignored `.env` for Docker Compose:
 
 ```text
 SPACETIME_URI=https://maincloud.spacetimedb.com
-SPACETIMEDB_DATABASE=<the exact database published locally>
-SYNC_RUNNER_ORIGIN=https://<your-domain>
-SYNC_RUNNER_TOKEN=<random operator access code, at least 32 characters>
-ANTHROPIC_API_KEY=<server-only key, optional for the LLM planner>
+SPACETIMEDB_DATABASE=<your published database>
+SYNC_RUNNER_ORIGIN=https://<your container application's public hostname>
+SYNC_RUNNER_TOKEN=<random operator code of at least 32 characters>
+ANTHROPIC_API_KEY=<optional server-only key for the LLM planner>
 ```
 
-Build and start the application from the repository root:
+For a local deployment, set SYNC_RUNNER_ORIGIN to `http://localhost:3003`.
+For a hosted deployment use the exact HTTPS origin (without a trailing slash or
+path) where users access this container. A Vercel frontend hostname does not
+route requests into your Docker container simply by setting an environment variable.
+
+From the repository root:
 
 ```powershell
 docker compose up --build -d
+docker compose logs -f sync
 ```
 
-The site is served on port 3003 by default. Put an HTTPS reverse proxy such as
-Caddy, nginx, or your hosting provider in front of it, and set
-`SYNC_RUNNER_ORIGIN` to the exact public origin (scheme and hostname, without a
-path). The container keeps feeder identities in a named volume, so recreating the
-container does not erase them. Back up that volume. The UI asks for the operator
-code on Run or Stop; the code and optional Anthropic key are only runtime secrets.
-To update, pull the new revision and run `docker compose up --build -d` again.
+The application listens on port 3003. Its host should provide HTTPS and route
+traffic to that port. Deploy one replica and mount a persistent volume at
+`/app/.local`; the supplied Compose configuration does this with a named volume.
+This stores feeder and worker identities. Back it up, and do not remove it when
+upgrading. Restarting the container interrupts an active scenario; its unfinished
+database runs remain accessible through the retained identities.
 
-This combines the dashboard and scenario feeder. If you also need external agent
-worker processes, configure and run `pnpm dev:agents` as another supervised
-service using the instructions in CART_EXECUTION.md; it requires a specific run
-ID and execution adapter, so it cannot be started meaningfully before a run is
-created.
+For a container host that builds Dockerfiles directly, select `Dockerfile`, expose
+port 3003 (or set PORT to the provider's HTTP port), supply the same runtime
+variables, and mount the volume. Use the image's default command. There is no
+static output directory or separate frontend deployment.
 
-## Vercel dashboard
+To build a reusable image and run it without Compose:
 
-Set the project Root Directory to the repository root (not `apps/web`). The
-checked-in `vercel.json` sets:
+```powershell
+docker build -t sync:prod .
+docker run -d --name sync --init --restart unless-stopped -p 3003:3003 --env-file .env -v sync-state:/app/.local sync:prod
+```
 
-- Install: `pnpm install --frozen-lockfile`
-- Build: `pnpm typecheck:source && pnpm build:web`
-- Output: `apps/web/dist`
-- Development: `pnpm dev:web` (used for local development, not a production service)
+The default image command is `node --import tsx scripts/runner-server.ts` (also
+available as `pnpm start`). The image includes both web assets and the scenario
+feeder. Operator Run/Stop actions require the access code, entered in the browser;
+it is held in memory until reload. Status and public database settings are readable
+without the code. The LLM key stays on the server. A configured key does not itself
+prove the selected model is available to the account; check the container logs
+for API errors.
 
-Do not add `pnpm run dev` after the build. Vercel serves the output directory.
-Use Node 22 matching package.json's minimum version or Node 24.
+## External agent processes in the same image
 
-Set these public build-time variables in Vercel's Production environment (and
-Preview separately if needed), then redeploy:
+The application can also launch the external worker supervisor as a child
+process inside this container. Set both:
 
 ```text
-VITE_SPACETIMEDB_URI=https://maincloud.spacetimedb.com
-VITE_SPACETIMEDB_DATABASE=<the exact database published locally>
-VITE_SYNC_RUNNER_URL=https://<persistent-runner-host>/feed
+SYNC_AGENT_ADAPTER=path/to/your/adapter.ts
+SYNC_AGENT_RUN_ID=123
 ```
 
-The runner URL is optional for a viewing-only deployment. Without it, controls
-remain visible with a viewing-only explanation. Environment changes require a
-new frontend build. Never give an API key or publisher token a `VITE_` prefix.
-The frontend does not need ANTHROPIC_API_KEY, SYNC_RUNNER_TOKEN, or a database
-publisher token. Remove those from Vercel unless another server feature uses them.
+The adapter must be included in the image and implement the contract described
+in CART_EXECUTION.md. The target run must already exist in external execution
+mode (`claude` on the wire). Grant the supervisor's printed identity service
+membership from that run's owner. No adapter is selected silently. The supervisor
+spawns the actual per-slot worker processes, and is stopped with the application.
+If the supervisor fails, the application exits so the host can restart it.
+The supervisor's health port 3001 is internal; the dashboard is served on PORT.
+The paired scenario benchmark feeder continues to use its existing engine-driven
+execution; configuring an adapter does not change those scenarios to external mode.
 
-## Persistent scenario runner
+## Why the previous Vercel deployment showed viewing only
 
-Deploy the same repository revision to a persistent Node host (a VM or container
-service), with HTTPS termination, one instance, and writable persistent storage
-mounted at `.local`. Install all dependencies with `pnpm install --frozen-lockfile`
-(the runner uses the tsx dependency). Start with `pnpm start:runner`.
+The old vercel.json selected a Vite static build and served `apps/web/dist`.
+That pipeline did not start the Docker image's Node process. RUNNER_URL was not
+read by the browser. Pointing it at the static site's own hostname could not
+create the missing `/feed` service.
 
-Configure its server environment:
+Vercel supports containers as stateless Functions, with function lifetime limits
+and no persistent local filesystem. The current feeder runs for minutes after
+POST returns, retains its process state between status requests, and stores
+identities in `.local`. It therefore requires a persistent container host.
+The old Vercel configuration has been removed, and Vite now rejects builds in
+Vercel so an incomplete static site cannot be published as a successful release.
 
-```text
-SPACETIME_URI=https://maincloud.spacetimedb.com
-SPACETIMEDB_DATABASE=<same database as the dashboard>
-SYNC_RUNNER_ORIGIN=https://<exact-vercel-dashboard-domain>
-SYNC_RUNNER_TOKEN=<random operator access code, at least 32 characters>
-ANTHROPIC_API_KEY=<server-only key, needed only for the LLM planner>
-PORT=3003
-```
+References:
 
-Use a single stable dashboard domain. Preview origins are not automatically
-authorized. Route HTTPS traffic to the runner port. Do not put the runner token
-in a frontend environment variable. The dashboard asks operators for it on the
-first Run or Stop action and retains it only in memory until reload. Status is
-public; start and stop require the code. Rotate the code by restarting the service
-with a new value. This is an operator console, not a multi-user permission system.
+- https://vercel.com/kb/guide/does-vercel-support-docker-deployments
+- https://vercel.com/i/can-you-run-docker-compose-on-vercel
 
-The runner permits one scenario at a time and rejects overlapping starts. Stop
-before starting another. Restarting the service interrupts an active feeder;
-unfinished runs remain in the database. Use a process manager for restart, and
-retain `.local` to preserve feeder identities and access to prior runs. Do not
-deploy this process as a Vercel function or start a detached child during a build.
+## Database releases and visibility
 
-For actual external-agent execution, host `pnpm dev:agents` separately with the
-configuration described in CART_EXECUTION.md. The scenario runner plays the
-existing benchmark scenarios; it does not provision cloud worker machines.
-
-## Database release and checks
-
-Continue publishing from your local machine before deploying the matching code:
+Publish the database from your local machine, then deploy the matching source
+revision and generated bindings:
 
 ```powershell
 pnpm db:generate
@@ -116,17 +113,16 @@ pnpm db:publish --break-clients
 pnpm db:describe
 ```
 
-Review the publish output; do not reset production data to fix a schema mismatch.
-Commit regenerated bindings together with module changes before pushing. The
-Vercel build deliberately does not generate bindings or publish the database.
+Do not reset production data to repair a schema mismatch. The Docker build never
+publishes the database or generates bindings; commit bindings with module changes.
 
-Check `/feed` on the runner: it should return JSON, not an HTML page. Open the
-deployed dashboard, run a small scenario using the operator code, and verify
-ticks and both result panels advance. LLM availability comes from the runner's
-key configuration, not Vercel's environment. An existing key alone does not prove
-the configured model is available to the account; API failures appear as run errors.
+Each browser origin has its own database identity. Moving from localhost or
+Vercel to the container domain does not transfer existing private viewer grants.
+Starting a scenario through `/feed` grants its new runs to the current browser;
+older private runs need a grant from their owner.
 
-Browser identities are origin-specific. A production browser does not inherit
-localhost's viewer grants. Starting through the runner grants the current viewer
-access to the new runs. For previously saved runs, grant that production viewer
-access from their owner; matching database names alone does not grant visibility.
+After deployment, `/health` should return JSON with `runtime: "sync-container"`,
+`/sync-config.js` should contain the correct public database address/name, and
+`/feed` should return JSON status. Start a small scenario and check that ticks
+advance. HTML or a 404 at these endpoints means traffic is reaching a static
+frontend or the wrong service.

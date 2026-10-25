@@ -29,12 +29,9 @@ const SEED = 5;
 /**
  * Starts scenarios from the dashboard through the configured runner service.
  */
-const runnerUrl = import.meta.env.VITE_SYNC_RUNNER_URL?.trim();
-const runner = runnerUrl
-  ? new DevFeederRunner(runnerUrl, true)
-  : import.meta.env.DEV
-    ? new DevFeederRunner()
-    : undefined;
+const runner = import.meta.env.DEV
+  ? new DevFeederRunner()
+  : new DevFeederRunner('/feed', true);
 
 /** Source for a toggle position. */
 function sourceFor(mode: DashboardMode): SyncSource {

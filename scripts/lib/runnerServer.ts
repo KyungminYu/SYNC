@@ -9,13 +9,16 @@ export function createRunnerServer(
   config: { uri: string; database: string },
   token: string,
   origin: string,
+  options: { webRoot?: string } = {},
 ) {
   if (token.length < 32 || !/^https?:\/\/[^/]+$/.test(origin))
     throw new Error(
       'Set SYNC_RUNNER_TOKEN (32+ characters) and SYNC_RUNNER_ORIGIN (exact dashboard origin).',
     );
   const feeder = createFeederHandler({ ...config, publicStatus: true });
-  const webRoot = resolve(repoRoot, 'apps/web/dist');
+  const webRoot = resolve(
+    options.webRoot ?? resolve(repoRoot, 'apps/web/dist'),
+  );
   const server = createServer((req, res) => {
     res.setHeader('cache-control', 'no-store');
     res.setHeader('content-type', 'application/json');
@@ -30,7 +33,30 @@ export function createRunnerServer(
       'Authorization, Content-Type',
     );
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    const path = new URL(req.url ?? '/', 'http://localhost').pathname;
+    let path: string;
+    try {
+      path = new URL(req.url ?? '/', 'http://localhost').pathname;
+    } catch {
+      res.writeHead(400).end('Invalid URL');
+      return;
+    }
+    if (path === '/health' && req.method === 'GET') {
+      res.end(JSON.stringify({ status: 'ok', runtime: 'sync-container' }));
+      return;
+    }
+    if (
+      path === '/sync-config.js' &&
+      (req.method === 'GET' || req.method === 'HEAD')
+    ) {
+      res.setHeader('content-type', 'text/javascript; charset=utf-8');
+      res.setHeader('x-content-type-options', 'nosniff');
+      res.end(
+        req.method === 'HEAD'
+          ? undefined
+          : `globalThis.__SYNC_CONFIG__ = ${JSON.stringify({ spacetimeUri: config.uri, database: config.database })};`,
+      );
+      return;
+    }
     if (path === '/feed') {
       if (req.method === 'OPTIONS') {
         res.writeHead(204).end();
@@ -83,6 +109,10 @@ export function createRunnerServer(
         try {
           body = await readFile(file);
         } catch {
+          if (extname(file)) {
+            res.writeHead(404).end('File not found');
+            return;
+          }
           served = resolve(webRoot, 'index.html');
           body = await readFile(served);
         }
