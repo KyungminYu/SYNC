@@ -189,6 +189,7 @@ export interface Decision {
 export interface Score {
   runId: string;
   T: number;
+  /** Orders served by their deadline (done in time, not late). */
   completedInT: number;
   totalJobs: number;
   lateCount: number;

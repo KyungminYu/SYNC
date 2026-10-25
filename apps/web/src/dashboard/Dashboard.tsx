@@ -123,6 +123,11 @@ export function Dashboard({
       stop = true;
     };
   }, [runner]);
+  /** Latest database entry of a fixed scenario (algorithm or LLM run). */
+  const latestRun = (id: string) =>
+    (scenarios ?? [])
+      .filter((s) => (s.run?.scenario ?? s.id) === id)
+      .sort((a, b) => (b.recency ?? 0) - (a.recency ?? 0))[0];
   const stopRunner =
     runner?.stop &&
     (async () => {
@@ -234,44 +239,51 @@ export function Dashboard({
               <ScenarioPicker
                 options={
                   runner
-                    ? // Every fixed scenario, with its state in the database
-                      // (never run = listed but not viewable yet).
+                    ? // Live: the fixed scenarios only, each with the state of
+                      // its latest run (algorithm or LLM; never run = listed
+                      // but not viewable yet). Stored results are in Sample.
                       runner.scenarios
                         .map((r): ScenarioOption => {
-                          const db = scenarios?.find((s) => s.id === r.id);
+                          const db = latestRun(r.id);
                           return {
                             ...r,
-                            meta: db?.meta ?? 'not run',
+                            meta: db?.meta
+                              ? `${db.meta}${db.run?.planner === 'llm' ? ' · LLM' : ''}`
+                              : 'not run',
                             disabled: !db,
                           };
                         })
                         .concat(
-                          (scenarios ?? []).filter(
-                            (s) => !runner.scenarios.some((r) => r.id === s.id),
-                          ),
+                          // Runs outside the fixed scenarios (external workers).
+                          (scenarios ?? []).filter((s) => !s.run),
                         )
                     : (scenarios ?? [])
                 }
-                value={scenarioId}
+                value={
+                  runner
+                    ? (scenarios?.find((s) => s.id === scenarioId)?.run
+                        ?.scenario ?? scenarioId)
+                    : scenarioId
+                }
                 showMeta={
                   source.origin === 'live' && source.delivery === 'stream'
                 }
-                onSelect={(id) => source.selectScenario?.(id)}
+                onSelect={(id) =>
+                  source.selectScenario?.(
+                    runner ? (latestRun(id)?.id ?? id) : id,
+                  )
+                }
                 onRun={
                   runner &&
                   (async (id) => {
                     if (!viewer)
                       throw new Error('Not connected to the database yet.');
                     // The source follows the scenario once its new runs appear.
-                    // An "· LLM" entry reruns its fixed scenario with the LLM;
-                    // other entries use the planner switch.
-                    const run = scenarios?.find((s) => s.id === id)?.run;
+                    // Run plays the fixed scenario with the planner switch.
                     await runner.start(
-                      run?.scenario ?? id,
+                      id,
                       viewer,
-                      run?.planner === 'llm' || (planner === 'llm' && llmOk)
-                        ? 'llm'
-                        : 'algorithm',
+                      planner === 'llm' && llmOk ? 'llm' : 'algorithm',
                     );
                   })
                 }

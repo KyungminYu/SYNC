@@ -389,6 +389,7 @@ export class SpacetimeSyncSource implements SyncSource {
         group: s.run?.planner === 'llm' ? `${s.load} · LLM` : s.load,
         canRun: s.load !== 'External workers',
         run: s.run,
+        recency: Number(newestId(s)),
         meta: `${state(s)} · tick ${tickOf(s)}`,
       };
     });

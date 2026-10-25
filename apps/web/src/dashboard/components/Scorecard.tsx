@@ -30,8 +30,8 @@ interface Term {
 const TERMS: Term[] = [
   {
     sign: '+',
-    label: 'Orders done in time window',
-    hint: 'more is better · counts toward the score',
+    label: 'Orders done in time',
+    hint: 'more is better · served before the deadline',
     value: (s) => s.completedInT,
     text: (s) => `${s.completedInT} of ${s.totalJobs}`,
     scale: (both) => Math.max(1, ...both.map((s) => s.totalJobs)),
@@ -41,7 +41,7 @@ const TERMS: Term[] = [
     label: 'Late orders',
     hint: 'fewer is better · penalty',
     value: (s) => s.lateCount,
-    text: (s) => `${s.lateCount}`,
+    text: (s) => `${s.lateCount} of ${s.totalJobs}`,
     scale: (both) => Math.max(1, ...both.map((s) => s.totalJobs)),
   },
   {
@@ -100,7 +100,7 @@ function summary(baseline: Score, sync: Score) {
   const orders = sync.completedInT - baseline.completedInT;
   const late = sync.lateCount - baseline.lateCount;
   const head =
-    `SYNC finished ${diff(orders, 'more', 'fewer', 'orders')} in ${sync.T} s ` +
+    `SYNC finished ${diff(orders, 'more', 'fewer', 'orders')} in time ` +
     `and left ${diff(late, 'more', 'fewer', 'customers late')}`;
   const objective =
     sync.objectiveValue !== undefined && baseline.objectiveValue !== undefined

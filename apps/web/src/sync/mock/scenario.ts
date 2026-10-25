@@ -744,7 +744,7 @@ function sampleDecisionCost(random: () => number) {
 /**
  * Objective (20) terms from the rows revealed up to time t. Mock-side only:
  * on the real system SYNC computes the score and the dashboard just shows it.
- * completedInT: orders served by T. lateCount: served after their deadline,
+ * completedInT: orders served by their deadline (on time). lateCount: served after their deadline,
  * or still unserved with the deadline already past (provisional definition).
  */
 export function scoreAt(data: RunData, t: number, planningMs: number): Score {
@@ -756,7 +756,7 @@ export function scoreAt(data: RunData, t: number, planningMs: number): Score {
     lateCount = 0;
   for (const job of data.jobs) {
     const f = done.get(job.id);
-    if (f !== undefined && f <= T) completedInT += job.value;
+    if (f !== undefined && f <= job.deadline) completedInT += job.value;
     if (
       (f !== undefined && f > job.deadline) ||
       (f === undefined && job.deadline < Math.min(t, T))
