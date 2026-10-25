@@ -10,13 +10,14 @@ import { databaseConfig } from './lib/databaseConfig.mjs';
  *                      [--db sync-coffee-live] [--trays 12] [--ms 200]
  *                      [--planner algorithm|llm]
  *
- * --planner llm: an LLM (scripts/lib/llmPlanner.ts) tunes the SYNC planner's
- * objective weights (β lateness, γ execution, δ coordination) every 10–30
- * ticks; needs ANTHROPIC_API_KEY (environment, or the repo root .env /
- * .env.local).
+ * --planner llm: an LLM (scripts/lib/llmPlanner.ts) decides the SYNC run's
+ * staffing (a second cashier, barista or server, and when they leave) when
+ * the backlog changes; needs ANTHROPIC_API_KEY (environment, or the repo
+ * root .env / .env.local).
  *
- * Scenarios differ by customers (12 / 16 / 20) and order size (1, 1–2, 1–3
- * drinks), ranked by total drinks; arrivals keep the mock's pace (seed 5).
+ * Scenarios differ by customers (16 / 20 / 24) and order size (1, 1–2, 1–3
+ * drinks), ranked by total drinks; customers come in at random intervals,
+ * fixed per scenario.
  *
  * Runs are private to their owner (this script). --viewer grants a dashboard
  * identity viewer access; viewers are remembered in .local/feeder-viewers so
