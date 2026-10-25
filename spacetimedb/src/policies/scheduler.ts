@@ -83,6 +83,12 @@ export interface PolicyConfig {
   executionWeight: number;
   /** δ: coordination cost; higher means less planning effort per tick. */
   coordinationWeight: number;
+  /**
+   * primal_dual may switch on a second worker per role when work queues up.
+   * Off by default: the shop keeps one person per role, and helping across
+   * roles is how a policy absorbs a rush.
+   */
+  adaptiveStaffing: boolean;
 }
 export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   policy: 'sync_greedy',
@@ -101,6 +107,7 @@ export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   deadlineWeight: 0.1,
   executionWeight: 0,
   coordinationWeight: 0,
+  adaptiveStaffing: false,
 };
 const POLICY_NAMES: readonly PolicyName[] = [
   'fcfs',
@@ -138,6 +145,8 @@ export function validatePolicyConfig(config: PolicyConfig): void {
     nonnegative(config[name], name);
     if (config[name] > 1000) throw new Error(`${name} exceeds supported limit`);
   }
+  if (typeof config.adaptiveStaffing !== 'boolean')
+    throw new Error('adaptiveStaffing must be a boolean');
   whole(config.timeScaleTicks, 'timeScaleTicks', 1);
   whole(config.costScaleMicrousd, 'costScaleMicrousd', 1);
   whole(config.maxAgeTicks, 'maxAgeTicks', 1);

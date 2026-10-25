@@ -628,7 +628,7 @@ export function schedule(s: State): void {
   refreshReady(s);
   if (config.policy === 'primal_dual') {
     batchReadyWork(s);
-    adaptStaffing(s);
+    if (config.adaptiveStaffing) adaptStaffing(s);
     if (
       s.run.mode === 'claude' &&
       !s.utensils.some((u) => u.state === 'clean') &&

@@ -771,3 +771,20 @@ test('Baseline (fcfs) gives each worker only its own role tasks', () => {
     assert.equal(w.role, t.role, `${t.kind} done by ${w.label}`);
   }
 });
+
+test('SYNC (primal_dual) keeps one worker per role unless adaptive staffing is on', () => {
+  const s = fresh();
+  setPolicy(s, OWNER, { policy: 'primal_dual' });
+  s.run.status = 'running';
+  for (let i = 0; i < 6; i++) order(s, `rush-${i}`, 'latte');
+  advanceUntil(s, () => s.tasks.every((t) => t.status === 'succeeded'), 800);
+  assert.ok(
+    !s.events.some((e) => e.type === 'worker_activated'),
+    'no second worker',
+  );
+  assert.ok(s.workers.filter((w) => w.enabled).length <= 4);
+  assert.throws(
+    () => setPolicy(s, OWNER, { adaptiveStaffing: 1 as never }),
+    /adaptiveStaffing/,
+  );
+});
