@@ -162,19 +162,24 @@ function liveLayout(workers: WorkerRow[], fixed: boolean) {
     const index = Number(w.label.match(/(\d+)\s*$/)?.[1] ?? 1) - 1;
     const slots = base.resources.filter((r) => r.type === ROLE_TYPE[role]);
     const slot = slots[Math.min(index, slots.length - 1)];
-    if (!agents.some((a) => a.id === role)) {
-      const home = slots[0];
+    // The base staff member of a role is "cashier"; a second worker the
+    // engine switches on is "cashier2", at home on the role's second slot
+    // and drawn only while working (it joins for the rush, then leaves).
+    const id = index === 0 ? role : `${role}${index + 1}`;
+    if (!agents.some((a) => a.id === id)) {
+      const home = slots[Math.min(index, slots.length - 1)];
       agents.push({
-        id: role,
-        name: ROLE_NAME[role],
+        id,
+        name: index === 0 ? ROLE_NAME[role] : `${ROLE_NAME[role]} ${index + 1}`,
         role,
         primaryTypes: [ROLE_TYPE[role]],
         startX: home.standX ?? home.x,
         startY: home.standY ?? home.y,
         ...(fixed ? { fixed: true } : {}),
+        ...(index === 0 ? {} : { enabled: false }),
       });
     }
-    slotOf.set(String(w.id), { agentId: role, resourceId: slot.id });
+    slotOf.set(String(w.id), { agentId: id, resourceId: slot.id });
   }
   // Same order as the shop layout (cashier, barista, server, cleaner).
   const order = base.agents.map((a) => a.role);

@@ -62,26 +62,46 @@ export function load(store: ReadDb, runId: bigint): State {
   }
   return state;
 }
-const signature = (row: unknown): string =>
-  JSON.stringify(row, (_k, v) =>
-    typeof v === 'bigint' ? { $bigint: v.toString() } : v,
+// Schema rows contain primitives and arrays of primitives. Avoid serializing
+// every bigint and allocating two JSON strings for each comparison.
+function sameRow(a: object, b: object): boolean {
+  const old = a as Record<string, unknown>;
+  const next = b as Record<string, unknown>;
+  const keys = Object.keys(old);
+  return (
+    keys.length === Object.keys(next).length &&
+    keys.every((key) => {
+      if (!Object.hasOwn(next, key)) return false;
+      const x = old[key],
+        y = next[key];
+      return Array.isArray(x)
+        ? Array.isArray(y) &&
+            x.length === y.length &&
+            x.every((v, i) => v === y[i])
+        : x === y;
+    })
   );
+}
 function saveTable<T extends Base>(
   table: MutableTable<T>,
   rows: T[],
   runId: bigint,
 ): void {
-  const ids = new Set(rows.map((r) => r.key));
-  for (const old of [...table.runId.filter(runId)])
-    if (!ids.has(old.key)) table.key.delete(old.key);
+  // One indexed scan replaces a scan plus an individual host lookup per row.
+  const existing = new Map(
+    [...table.runId.filter(runId)].map((r) => [r.key, r]),
+  );
   for (const row of rows) {
-    const old = table.key.find(row.key);
+    const old = existing.get(row.key);
     if (!old) table.insert(row);
-    else if (signature(old) !== signature(row)) table.key.update(row);
+    else if (!sameRow(old, row)) table.key.update(row);
+    existing.delete(row.key);
   }
+  for (const key of existing.keys()) table.key.delete(key);
 }
 export function save(store: MutableDb, state: State): void {
-  store.run.id.update(state.run);
+  const oldRun = store.run.id.find(state.run.id);
+  if (!oldRun || !sameRow(oldRun, state.run)) store.run.id.update(state.run);
   saveTable(store.taskItems, state.taskItems, state.run.id);
   saveTable(store.utensils, state.utensils, state.run.id);
   saveTable(store.planner, state.planner, state.run.id);

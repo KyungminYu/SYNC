@@ -75,14 +75,25 @@ async function until<T>(read: () => T | undefined, what: string): Promise<T> {
 export async function driveScenario(conn: DbConnection, o: DriveOptions) {
   const { seed, signal, log = () => {} } = o;
   const batch = randomUUID();
+  // Baseline: greedy first-come-first-served at fixed posts; a second worker
+  // joins a role when its work backs up. SYNC (algorithm): the primal-dual
+  // planner with helping across roles and the same adaptive staffing. SYNC
+  // with the LLM planner: staffing is left to the LLM (staffTarget).
   const runs = [
     {
       name: runName(o.load, o.n, 'baseline', batch, o.planner),
-      policy: 'fcfs',
+      policy: { policy: 'fcfs', adaptiveStaffing: true },
     },
     {
       name: runName(o.load, o.n, 'sync', batch, o.planner),
-      policy: 'primal_dual',
+      policy:
+        o.planner === 'llm'
+          ? // The LLM is the shop's manager: it decides staffing and is paid
+            // a manager's wage while it talks (reported planning time).
+            { policy: 'primal_dual', adaptiveStaffing: false }
+          : // Helping absorbs most rushes and extra staff is expensive, so SYNC
+            // adds staff only in a real rush (8 upcoming tasks; Baseline: 3).
+            { policy: 'primal_dual', adaptiveStaffing: true, staffingThreshold: 8 },
     },
   ] as const;
   // The engine allows 10 runs per owner and only reports a generic error when
@@ -135,7 +146,7 @@ export async function driveScenario(conn: DbConnection, o: DriveOptions) {
     created.flatMap(({ r, id }) => [
       conn.reducers.setPolicy({
         runId: id,
-        configJson: JSON.stringify({ policy: r.policy }),
+        configJson: JSON.stringify(r.policy),
       }),
       ...(o.viewers ?? []).map((hex) =>
         conn.reducers.grantMember({

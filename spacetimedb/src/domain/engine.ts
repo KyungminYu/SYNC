@@ -1,7 +1,7 @@
 import { measurePlanning } from './planningProbe.ts';
 import { REWARD_WEIGHTS } from './reward.ts';
 import { requestCancellation } from './externalExecution.ts';
-import { adaptStaffing, admissionBackpressure } from './staffing.ts';
+import { applyStaffing, admissionBackpressure } from './staffing.ts';
 import { taskOrders, batchReadyWork } from './cartWorkflow.ts';
 import {
   RollingHorizonEngine,
@@ -421,8 +421,11 @@ export function downstreamTail(
   s: State,
   t: Task,
   visited = new Set<bigint>(),
+  memo = new Map<bigint, number>(),
 ): number {
   if (visited.has(t.id)) throw new Error('DEPENDENCY_CYCLE');
+  const cached = memo.get(t.id);
+  if (cached !== undefined) return cached;
   // Delivery is the latency/value terminal. Cleanup has its own chain and no delivery deadline.
   if (t.kind === 'deliver_order' || t.kind === 'return_tray') return 0;
   const path = new Set(visited);
@@ -430,10 +433,12 @@ export function downstreamTail(
   const succ = s.dependencies
     .filter((d) => d.predecessorId === t.id)
     .map((d) => s.tasks.find((x) => x.id === d.successorId)!);
-  return Math.max(
+  const tail = Math.max(
     0,
-    ...succ.map((n) => n.durationTicks + downstreamTail(s, n, path)),
+    ...succ.map((n) => n.durationTicks + downstreamTail(s, n, path, memo)),
   );
+  memo.set(t.id, tail);
+  return tail;
 }
 export function snapshot(s: State): Snapshot {
   refreshReady(s);
@@ -622,9 +627,10 @@ export function schedule(s: State): void {
   if (s.run.status !== 'running') return;
   const config = readPolicy(s);
   refreshReady(s);
+  // Staffing first, so a worker switched on can take work this tick.
+  applyStaffing(s);
   if (config.policy === 'primal_dual') {
     batchReadyWork(s);
-    if (config.adaptiveStaffing) adaptStaffing(s);
     if (
       s.run.mode === 'claude' &&
       !s.utensils.some((u) => u.state === 'clean') &&

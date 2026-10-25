@@ -115,12 +115,21 @@ describe('mapRun', () => {
 
   it('produces contract-valid rows', () => {
     expect(checkRun(data)).toEqual([]);
-    // Seven engine workers, one person per role on the floor.
+    // Seven engine workers: the four base staff plus a second cashier,
+    // barista and server, drawn only while the engine has them working.
     expect(data.layout.agents.map((a) => a.id)).toEqual([
       'cashier',
+      'cashier2',
       'barista',
+      'barista2',
       'server',
+      'server2',
       'cleaner',
+    ]);
+    expect(data.layout.agents.filter((a) => a.enabled === false).map((a) => a.id)).toEqual([
+      'cashier2',
+      'barista2',
+      'server2',
     ]);
   });
 
@@ -296,26 +305,36 @@ describe('one person per role and per slot', () => {
   const ids = (d: ReturnType<typeof normalizeRun>, t: number) =>
     sceneAt(d, t).agents.map((a) => a.id);
 
-  it('draws one person per role even when two engine workers work at once', () => {
+  it('draws the second cashier at Register 2 while the engine has them working', () => {
     // Cashier 1 and cashier 2 both take an order at tick 11.
     const data = normalizeRun(mapRun(rows, 'sync'));
-    expect(ids(data, 12)).toEqual(['cashier', 'barista', 'server', 'cleaner']);
+    expect(ids(data, 12)).toEqual(['cashier', 'cashier2', 'barista', 'server', 'cleaner']);
     const scene = sceneAt(data, 12);
-    // No work without a person: both orders are taken at the cashier's register.
-    expect(scene.slots.filter((s) => s.state === 'busy').map((s) => s.id)).toEqual(['reg1']);
-    const cashier = scene.agents.find((a) => a.id === 'cashier')!;
-    expect(cashier).toMatchObject({ state: 'working', x: 2.5, y: 3.5 });
+    // Every busy slot has its person: Register 1 and Register 2.
+    expect(scene.slots.filter((s) => s.state === 'busy').map((s) => s.id).sort()).toEqual(['reg1', 'reg2']);
+    const reg2 = data.layout.resources.find((r) => r.id === 'reg2')!;
+    expect(scene.agents.find((a) => a.id === 'cashier2')).toMatchObject({
+      state: 'working',
+      x: reg2.standX ?? reg2.x,
+    });
+    // Off shift (no work in hand): the second cashier is not on the floor.
+    expect(ids(data, 5)).not.toContain('cashier2');
   });
 
-  it('keeps a person at their slot until every task they hold is done', () => {
-    // Cashier 2's payment runs to tick 16, past cashier 1's (15): one person, one slot.
+  it('keeps each person at their slot until every task they hold is done', () => {
+    // Cashier 1's payment runs 13-15 at Register 1, cashier 2's 13-16 at Register 2.
     const data = normalizeRun(mapRun(rows, 'sync'));
-    for (const t of [13, 14, 15]) {
+    for (const t of [13, 14]) {
       const scene = sceneAt(data, t);
       expect(scene.agents.find((a) => a.id === 'cashier')).toMatchObject({ state: 'working', x: 2.5 });
-      expect(scene.slots.find((s) => s.id === 'reg2')?.state).toBe('idle');
+      expect(scene.agents.find((a) => a.id === 'cashier2')?.state).toBe('working');
     }
-    expect(sceneAt(data, 16.5).agents.find((a) => a.id === 'cashier')?.state).toBe('idle');
+    const at15 = sceneAt(data, 15.5);
+    expect(at15.agents.find((a) => a.id === 'cashier')?.state).toBe('idle');
+    expect(at15.agents.find((a) => a.id === 'cashier2')?.state).toBe('working');
+    expect(at15.slots.find((s) => s.id === 'reg2')?.state).toBe('busy');
+    // Done: the second cashier leaves the floor.
+    expect(sceneAt(data, 16.5).agents.some((a) => a.id === 'cashier2')).toBe(false);
   });
 
   it('lets the engine\'s helper do the work at a free slot of its type (SYNC)', () => {

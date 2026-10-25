@@ -79,17 +79,42 @@ export interface PolicyConfig {
    * β: lateness per tick (penalty for missing deadlines).
    */
   deadlineWeight: number;
-  /** γ: modeled execution cost (per 1000 µUSD) and eagerness to add staff. */
+  /**
+   * γ: modeled execution cost per 1000 µUSD, capped at 30 units. Batched
+   * drink tasks cost their length, so γ > 0 takes short tasks a little
+   * sooner (less waiting); a costly task waits but is never starved.
+   */
   executionWeight: number;
-  /** δ: coordination cost; higher means less planning effort per tick. */
+  /**
+   * δ: coordination cost; planning runs 16 / (1 + δ) price iterations, so
+   * higher means less planning effort per tick.
+   */
   coordinationWeight: number;
   /**
-   * primal_dual may switch on a second worker per role when work queues up.
-   * Off by default: the shop keeps one person per role, and helping across
-   * roles is how a policy absorbs a rush.
+   * Staffing. Each role has one worker (the four base staff) and may add a
+   * second cashier / barista / server (the cleaner stays alone).
+   * adaptiveStaffing: the engine's own rule adds the second worker of a role
+   * when at least staffingThreshold of its tasks are ready or about to be,
+   * and drops it again (once idle) when they are not.
    */
   adaptiveStaffing: boolean;
+  staffingThreshold: number;
+  /**
+   * Utility a worker loses on another role's task (primal_dual): its own
+   * role's worker wins whenever free; a helper only wins when that worker is
+   * busy for a while. 0 = no preference.
+   */
+  helpPenalty: number;
+  /**
+   * External staffing (e.g. an LLM planner): workers per role, 1 or 2. When
+   * set it replaces the adaptive rule; a worker being dropped finishes the
+   * task in hand first.
+   */
+  staffTarget?: Partial<Record<StaffedRole, 1 | 2>>;
 }
+/** Roles that may add a second worker. */
+export const STAFFED_ROLES = ['cashier', 'barista', 'server'] as const;
+export type StaffedRole = (typeof STAFFED_ROLES)[number];
 export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   policy: 'sync_greedy',
   urgencyWeight: 2,
@@ -104,10 +129,14 @@ export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
   maxAgeTicks: 300,
   candidatesPerWorker: 4,
   maxBranches: 2000,
+  // Engine sweep, 9 scenarios: γ 0.3 cuts waiting slightly (+0.8 objective);
+  // δ 3 (4 price iterations) plans the same as δ 0 (16), 57% faster.
   deadlineWeight: 0.1,
-  executionWeight: 0,
-  coordinationWeight: 0,
+  executionWeight: 0.3,
+  coordinationWeight: 3,
   adaptiveStaffing: false,
+  staffingThreshold: 3,
+  helpPenalty: 0.5,
 };
 const POLICY_NAMES: readonly PolicyName[] = [
   'fcfs',
@@ -141,12 +170,29 @@ export function validatePolicyConfig(config: PolicyConfig): void {
     'deadlineWeight',
     'executionWeight',
     'coordinationWeight',
+    'helpPenalty',
   ] as const) {
     nonnegative(config[name], name);
     if (config[name] > 1000) throw new Error(`${name} exceeds supported limit`);
   }
   if (typeof config.adaptiveStaffing !== 'boolean')
     throw new Error('adaptiveStaffing must be a boolean');
+  whole(config.staffingThreshold, 'staffingThreshold', 1);
+  if (config.staffingThreshold > 20)
+    throw new Error('staffingThreshold exceeds supported limit');
+  if (config.staffTarget !== undefined) {
+    const t = config.staffTarget as Record<string, unknown>;
+    if (t === null || typeof t !== 'object' || Array.isArray(t))
+      throw new Error('staffTarget must be an object');
+    for (const [role, n] of Object.entries(t))
+      if (
+        !(STAFFED_ROLES as readonly string[]).includes(role) ||
+        (n !== 1 && n !== 2)
+      )
+        throw new Error(
+          'staffTarget must map cashier / barista / server to 1 or 2',
+        );
+  }
   whole(config.timeScaleTicks, 'timeScaleTicks', 1);
   whole(config.costScaleMicrousd, 'costScaleMicrousd', 1);
   whole(config.maxAgeTicks, 'maxAgeTicks', 1);
