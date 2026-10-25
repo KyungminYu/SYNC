@@ -4,12 +4,12 @@ import { MENU } from './menu';
 /**
  * Fixed live scenarios, ranked by how many drinks the shop must make.
  *
- * Each scenario is a number of customers (12 / 16 / 20) and an order size
+ * Each scenario is a number of customers (16 / 20 / 24) and an order size
  * (1 drink each, 1–2, or 1–3). The nine combinations are sorted by total
- * drinks; on a tie the one with fewer customers is easier. Arrivals keep the
- * mock's pace (the first customers of the mock scenario), so more customers
- * also means a longer stream of arrivals. Values live only here
- * (design doc §7).
+ * drinks; on a tie the one with fewer customers is easier. Customers come in
+ * at random intervals (fixed per scenario) averaging the mock's pace, so
+ * rushes and lulls alternate and more customers also means a longer stream
+ * of arrivals. Values live only here (design doc §7).
  */
 
 /** Load levels, lightest first (also the dropdown group order). */
@@ -58,7 +58,7 @@ function drinkCounts(customers: number, maxDrinks: number): number[] {
 const SIZE_TEXT = { 1: '1 drink each', 2: '1–2 drinks', 3: '1–3 drinks' } as const;
 
 /** Every customers × order-size pair, ranked by drinks (ties: fewer customers). */
-export const SCENARIOS: ScenarioDef[] = ([12, 16, 20] as const)
+export const SCENARIOS: ScenarioDef[] = ([16, 20, 24] as const)
   .flatMap((customers) =>
     ([1, 2, 3] as const).map((maxDrinks) => {
       const drinks = drinkCounts(customers, maxDrinks).reduce((a, b) => a + b, 0);
@@ -87,6 +87,9 @@ export interface ScenarioCustomer {
   items: OrderItem[];
 }
 
+/** Mean seconds between two customers (the mock's pace). */
+export const MEAN_GAP = 7;
+
 /** Small deterministic PRNG, so a scenario is the same on every run. */
 function rng(seed: number) {
   let n = seed >>> 0 || 1;
@@ -97,9 +100,26 @@ function rng(seed: number) {
 }
 
 /**
- * The scenario's customers: the first `def.customers` of `base` (their ids
- * and arrival times), each ordering their share of drinks. Who orders how
- * many, and which drinks, is shuffled with `seed` (fixed per scenario).
+ * Door times at random intervals: exponential gaps (a Poisson stream, so
+ * customers bunch up and thin out), rescaled so the last customer still
+ * comes in at (customers - 1) × MEAN_GAP. The stream length stays fixed
+ * per size; only the pattern inside it is random.
+ */
+function arrivals(customers: number, random: () => number): number[] {
+  const gaps = Array.from(
+    { length: customers - 1 },
+    () => -Math.log(1 - random()),
+  );
+  const scale = ((customers - 1) * MEAN_GAP) / gaps.reduce((a, b) => a + b, 0);
+  let t = 0;
+  return [0, ...gaps.map((g) => Math.round((t += g * scale) * 10) / 10)];
+}
+
+/**
+ * The scenario's customers: the ids of the first `def.customers` of `base`,
+ * each ordering their share of drinks and coming in at random intervals.
+ * Who orders how many, which drinks, and the intervals are drawn with
+ * `seed` (fixed per scenario).
  */
 export function applyScenario(
   def: ScenarioDef,
@@ -113,9 +133,14 @@ export function applyScenario(
     const j = Math.floor(random() * (i + 1));
     [counts[i], counts[j]] = [counts[j], counts[i]];
   }
-  return base.slice(0, def.customers).map((c, i) => ({
-    id: c.id,
-    arrival: c.arrival,
+  // Own stream for door times, so changing them never reshuffles the drinks.
+  const doors = arrivals(
+    def.customers,
+    rng(seed * 131 + def.customers * 11 + def.maxDrinks),
+  );
+  return Array.from({ length: def.customers }, (_, i) => ({
+    id: base[i]?.id ?? `c${i + 1}`,
+    arrival: doors[i],
     items: Array.from(
       { length: counts[i] },
       () => MENU[Math.floor(random() * MENU.length)],
