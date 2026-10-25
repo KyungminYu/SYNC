@@ -223,14 +223,25 @@ export const ui_orders = db.view(
       'recipes',
       'orders',
       'tasks',
-    ]).flatMap((s) =>
-      s.orders.map((o) => {
-        const tasks = s.tasks.filter((t) =>
-          taskOrders(s, t).some((x) => x.id === o.id),
-        );
+    ]).flatMap((s) => {
+      const counts = new Map<bigint, { ready: number; active: number }>();
+      for (const task of s.tasks) {
+        if (
+          !['ready', 'assigned', 'running', 'uncertain'].includes(task.status)
+        )
+          continue;
+        for (const order of taskOrders(s, task)) {
+          const count = counts.get(order.id) ?? { ready: 0, active: 0 };
+          if (task.status === 'ready') count.ready++;
+          else count.active++;
+          counts.set(order.id, count);
+        }
+      }
+      const carts = new Map(s.carts.map((c) => [c.id, c]));
+      return s.orders.map((o) => {
         return {
           ...rowBase(o),
-          cart_key: s.carts.find((c) => c.id === o.cartId)!.externalKey,
+          cart_key: carts.get(o.cartId)!.externalKey,
           recipe_key: recipeOf(s, o).recipe,
           status: o.status,
           arrival_tick: o.arrivalTick,
@@ -241,14 +252,12 @@ export const ui_orders = db.view(
           customer_release_tick: o.customerReleaseTick,
           cleanup_completed_tick: o.cleanupCompletedTick,
           tray_id: o.trayId,
-          ready_tasks: tasks.filter((t) => t.status === 'ready').length,
-          active_tasks: tasks.filter((t) =>
-            ['assigned', 'running', 'uncertain'].includes(t.status),
-          ).length,
+          ready_tasks: counts.get(o.id)?.ready ?? 0,
+          active_tasks: counts.get(o.id)?.active ?? 0,
           delivery_late: (o.deliveredTick ?? s.run.tick) > o.deadlineTick,
         };
-      }),
-    ),
+      });
+    }),
 );
 export const ui_tasks = db.view(
   { name: 'ui_tasks', public: true },
@@ -265,8 +274,9 @@ export const ui_tasks = db.view(
       'resources',
       'reservations',
       'trays',
-    ]).flatMap((s) =>
-      s.tasks.map((task) => {
+    ]).flatMap((s) => {
+      const tails = new Map<bigint, number>();
+      return s.tasks.map((task) => {
         const order = s.orders.find((o) => o.id === task.orderId)!;
         let reason = blockedReason(s, task);
         if (reason === 'eligible') {
@@ -330,12 +340,12 @@ export const ui_tasks = db.view(
                   task.deadlineTick -
                     s.run.tick -
                     task.durationTicks -
-                    downstreamTail(s, task),
+                    downstreamTail(s, task, undefined, tails),
                 ),
           priority: task.priority,
         };
-      }),
-    ),
+      });
+    }),
 );
 export const ui_dag_edges = db.view(
   { name: 'ui_dag_edges', public: true },

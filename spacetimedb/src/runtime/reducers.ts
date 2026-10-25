@@ -30,6 +30,17 @@ import type { PolicyConfig } from '../policies/scheduler.ts';
 import { load, save } from './store.ts';
 import type { MutableDb } from './store.ts';
 import { isRecipeId } from '../domain/recipes.ts';
+
+/** Diagnostic host timers only; elapsed time never affects reducer decisions. */
+function timeTickPhase<T>(label: string, work: () => T): T {
+  console.time(label);
+  try {
+    return work();
+  } finally {
+    // Close timers on errors and early returns as well as successful ticks.
+    console.timeEnd(label);
+  }
+}
 export const create_run = db.reducer(
   {
     name: t.string(),
@@ -67,12 +78,7 @@ export const create_run = db.reducer(
       args.budgetMicrousd,
     );
     save(ctx.db as unknown as MutableDb, state);
-    // Exactly one schedule row per run; runId has a unique index.
-    ctx.db.clock.insert({
-      scheduledId: 0n,
-      scheduledAt: ScheduleAt.interval(200000n),
-      runId: inserted.id,
-    });
+    // Runs start paused. Arm their clock only when explicitly started.
   },
 );
 export const grant_member = db.reducer(
@@ -104,6 +110,15 @@ export const set_run_status = db.reducer(
     const s = load(store, args.runId);
     setRunning(s, { identityHex: ctx.sender.toHexString() }, args.running);
     save(store, s);
+    const timer = ctx.db.clock.runId.find(args.runId);
+    if (s.run.status === 'running') {
+      if (!timer)
+        ctx.db.clock.insert({
+          scheduledId: 0n,
+          scheduledAt: ScheduleAt.interval(200000n),
+          runId: args.runId,
+        });
+    } else if (timer) ctx.db.clock.scheduledId.delete(timer.scheduledId);
   },
 );
 export const enqueue_order = db.reducer(
@@ -188,31 +203,40 @@ export const set_task_priorities = db.reducer(
   },
 );
 export const step_run = db.reducer({ runId: t.u64() }, (ctx, args) => {
-  const store = ctx.db as unknown as MutableDb;
-  const s = load(store, args.runId);
-  requireControl(s, { identityHex: ctx.sender.toHexString() });
-  // Manual step is deliberately paused-only to avoid a browser speeding up a live clock.
-  if (s.run.status !== 'paused') throw new Error('PAUSE_BEFORE_MANUAL_STEP');
-  s.run.status = 'running';
-  advance(s);
-  if (s.run.status === 'running') s.run.status = 'paused';
-  save(store, s);
+  const label = `[perf] step_run run=${args.runId}`;
+  timeTickPhase(`${label} total`, () => {
+    const store = ctx.db as unknown as MutableDb;
+    const s = timeTickPhase(`${label} load`, () => load(store, args.runId));
+    requireControl(s, { identityHex: ctx.sender.toHexString() });
+    // Manual step is deliberately paused-only to avoid a browser speeding up a live clock.
+    if (s.run.status !== 'paused') throw new Error('PAUSE_BEFORE_MANUAL_STEP');
+    s.run.status = 'running';
+    timeTickPhase(`${label} advance`, () => advance(s));
+    if (s.run.status === 'running') s.run.status = 'paused';
+    timeTickPhase(`${label} save`, () => save(store, s));
+  });
 });
 export const tick_run = db.reducer(
   { onSchedule: clock },
   { arg: clock.rowType },
   (ctx, { arg }) => {
-    const store = ctx.db as unknown as MutableDb;
-    const s = load(store, arg.runId);
-    if (ctx.db.run.id.find(arg.runId)?.status === 'completed') {
+    // Handle stale deliveries and legacy clocks before loading any child rows.
+    const timer = ctx.db.clock.runId.find(arg.runId);
+    if (!timer || timer.scheduledId !== arg.scheduledId) return;
+    const run = ctx.db.run.id.find(arg.runId);
+    if (!run || run.status !== 'running') {
       ctx.db.clock.scheduledId.delete(arg.scheduledId);
       return;
     }
-    if (s.run.status !== 'running') return;
-    advance(s);
-    save(store, s);
-    if (ctx.db.run.id.find(arg.runId)?.status === 'completed')
-      ctx.db.clock.scheduledId.delete(arg.scheduledId);
+    const label = `[perf] tick_run run=${arg.runId}`;
+    timeTickPhase(`${label} total`, () => {
+      const store = ctx.db as unknown as MutableDb;
+      const s = timeTickPhase(`${label} load`, () => load(store, arg.runId));
+      timeTickPhase(`${label} advance`, () => advance(s));
+      timeTickPhase(`${label} save`, () => save(store, s));
+      if (s.run.status !== 'running')
+        ctx.db.clock.scheduledId.delete(arg.scheduledId);
+    });
   },
 );
 export const claim_agent_job = db.reducer(

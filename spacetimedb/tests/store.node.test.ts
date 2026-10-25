@@ -11,7 +11,7 @@ function memoryPort(states: State[]) {
   const runRows = new Map(
     states.map((s) => [s.run.id, structuredClone(s.run)]),
   );
-  const counters = { writes: 0 };
+  const counters = { writes: 0, childFinds: 0 };
   const store: Record<string, unknown> = {
     run: {
       id: {
@@ -38,7 +38,10 @@ function memoryPort(states: State[]) {
     );
     store[name] = {
       key: {
-        find: (key: string) => structuredClone(rows.get(key)),
+        find: (key: string) => {
+          counters.childFinds++;
+          return structuredClone(rows.get(key));
+        },
         update: (row: { key: string }) => {
           rows.set(row.key, structuredClone(row));
           counters.writes++;
@@ -96,7 +99,20 @@ test('persistence port stores new DAG rows and keeps another run untouched', () 
 test('saving an unchanged state does not rewrite every child row', () => {
   const { store, counters } = memoryPort([fresh()]);
   save(store, load(store, 1n));
-  assert.equal(counters.writes, 1); // run revision write only
+  assert.equal(counters.writes, 0); // no run invalidation or child row writes
+  assert.equal(counters.childFinds, 0); // indexed scan is reused for comparisons
+});
+
+test('persistence detects in-place array edits and deleted rows without rewriting the run', () => {
+  const { store, counters } = memoryPort([fresh()]);
+  const state = load(store, 1n);
+  state.workers[0]!.capabilities.push('new-capability');
+  const removed = state.workers.pop()!;
+  save(store, state);
+  assert.equal(counters.writes, 2);
+  const after = load(store, 1n);
+  assert.ok(after.workers[0]!.capabilities.includes('new-capability'));
+  assert.ok(!after.workers.some((w) => w.id === removed.id));
 });
 test('indexed readable runs enforce owner/viewer/operator isolation and exclude service membership', () => {
   const a = fresh(),
