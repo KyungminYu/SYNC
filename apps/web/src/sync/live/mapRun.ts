@@ -198,7 +198,8 @@ function scoreAt(
   for (const job of data.jobs) {
     if (job.arrival > t) continue;
     const f = done.get(job.id);
-    if (f !== undefined && f <= T) completedInT += job.value;
+    // Done in time: served by the customer's deadline (not late).
+    if (f !== undefined && f <= job.deadline) completedInT += job.value;
     // Late: served after the deadline, or still waiting with it already past.
     if (
       (f !== undefined && f > job.deadline) ||
