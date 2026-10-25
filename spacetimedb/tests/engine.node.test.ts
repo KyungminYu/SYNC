@@ -793,8 +793,9 @@ test('SYNC (primal_dual) gives each task to its own role while that worker is fr
   const s = fresh();
   setPolicy(s, OWNER, { policy: 'primal_dual' });
   s.run.status = 'running';
-  // One customer: nobody is ever busy enough to need help.
-  order(s, 'calm-1', 'latte');
+  // One black coffee: no two steps of a role are ready at once, so nobody
+  // is ever busy enough to need help.
+  order(s, 'calm-1', 'black_coffee');
   advanceUntil(s, () => s.tasks.every((t) => t.status === 'succeeded'), 400);
   for (const t of s.tasks) {
     const w = s.workers.find((x) => x.id === t.workerId)!;

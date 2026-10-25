@@ -131,14 +131,10 @@ export function createState(
         ...nextBase(s),
         label: `${role} ${i + 1}`,
         role,
-        capabilities:
-          role === 'cashier'
-            ? ['cashier', 'server', 'cup_prep']
-            : role === 'server'
-              ? ['server', 'cashier', 'cleaner', 'cup_prep']
-              : role === 'cleaner'
-                ? ['cleaner', 'cup_prep']
-                : ['barista', 'cup_prep'],
+        // Everyone can do every job; their role is their main job and the
+        // planner prefers it (others only help). Baseline (fcfs) keeps each
+        // worker to its own role.
+        capabilities: ['cashier', 'barista', 'server', 'cleaner', 'cup_prep'],
         enabled: i === 0,
         speedFactor: 1,
         x: Object.keys(ROLE_CAPACITIES).indexOf(role) * 3,
