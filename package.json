@@ -14,6 +14,7 @@
     "db:publish": "node scripts/db.mjs publish",
     "db:generate": "node scripts/db.mjs generate",
     "db:logs": "node scripts/db.mjs logs",
+    "build:web": "pnpm --filter @sync/web build",
     "build": "pnpm db:generate && pnpm typecheck:source && pnpm --filter @sync/web build",
     "typecheck": "pnpm db:generate && pnpm typecheck:source",
     "typecheck:source": "tsc --noEmit",
