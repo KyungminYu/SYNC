@@ -13,12 +13,6 @@ export const ROLLING_CONFIG = Object.freeze({
   refreshTicks: 8,
   step: 2,
   maxPrice: 100,
-  /**
-   * Utility a worker loses on another role's task. Its own role's worker
-   * wins whenever free; a helper only wins when that worker is busy for a
-   * while (start-time discount 0.05 per tick outweighs the penalty).
-   */
-  crossRolePenalty: 0.5,
 });
 export interface Forecast extends Assignment {
   startTick: number;
@@ -202,7 +196,7 @@ export class RollingHorizonEngine {
             Math.min(1, Number(task.estimatedCostMicrousd) / 1000000) -
             (weights.executionWeight * Number(task.estimatedCostMicrousd)) /
               1000 -
-            (worker.role === task.role ? 0 : ROLLING_CONFIG.crossRolePenalty);
+            (worker.role === task.role ? 0 : weights.helpPenalty);
           candidates.push({
             taskId: task.id,
             workerId: worker.id,

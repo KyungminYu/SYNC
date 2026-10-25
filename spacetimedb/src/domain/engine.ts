@@ -1,7 +1,7 @@
 import { measurePlanning } from './planningProbe.ts';
 import { REWARD_WEIGHTS } from './reward.ts';
 import { requestCancellation } from './externalExecution.ts';
-import { adaptStaffing, admissionBackpressure } from './staffing.ts';
+import { applyStaffing, admissionBackpressure } from './staffing.ts';
 import { taskOrders, batchReadyWork } from './cartWorkflow.ts';
 import {
   RollingHorizonEngine,
@@ -622,9 +622,10 @@ export function schedule(s: State): void {
   if (s.run.status !== 'running') return;
   const config = readPolicy(s);
   refreshReady(s);
+  // Staffing first, so a worker switched on can take work this tick.
+  applyStaffing(s);
   if (config.policy === 'primal_dual') {
     batchReadyWork(s);
-    if (config.adaptiveStaffing) adaptStaffing(s);
     if (
       s.run.mode === 'claude' &&
       !s.utensils.some((u) => u.state === 'clean') &&

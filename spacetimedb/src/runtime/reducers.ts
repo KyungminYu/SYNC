@@ -155,6 +155,9 @@ export const set_policy = db.reducer(
       'executionWeight',
       'coordinationWeight',
       'adaptiveStaffing',
+      'staffingThreshold',
+      'staffTarget',
+      'helpPenalty',
     ];
     if (Object.keys(patch).some((k) => !allowed.includes(k)))
       throw new Error('UNKNOWN_POLICY_FIELD');
